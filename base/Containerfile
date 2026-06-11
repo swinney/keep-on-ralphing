@@ -51,6 +51,13 @@ ARG USER_GID=1000
 RUN groupadd -g ${USER_GID} claude \
     && useradd -m -u ${USER_UID} -g ${USER_GID} -s /bin/bash claude
 
+# Put the user's pip --user bin dir on PATH for EVERY exec context, not just
+# login shells. A consumer's Containerfile pip-installs its gate tools (ruff,
+# mypy, pytest, ...) as this non-root user, landing them in ~/.local/bin. Debian
+# only adds that to PATH from ~/.profile (login shells); the loop runs the gate
+# in a non-login shell, so without this the gate would hit "command not found".
+ENV PATH="/home/claude/.local/bin:${PATH}"
+
 USER claude
 WORKDIR /workspace
 CMD ["bash"]

@@ -1,0 +1,58 @@
+# ralph.conf — the one place you set project-specific values for the Ralph
+# harness. Copy this file to `ralph.conf` (next to where you run the scripts,
+# usually your repo root) and edit. Every value here can also be overridden by
+# an environment variable of the same name; precedence is:
+#
+#     environment  >  ralph.conf  >  the script's built-in default
+#
+# This is plain shell (sourced by ralph.sh, and read by the /ralph-status skill):
+# KEY="value", no spaces around `=`, `#` starts a comment.
+
+# --- where the loop operates -------------------------------------------------
+
+# Project directory the loop runs in. Inside a container this is the bind-mount
+# target (e.g. /workspace); on the host it is usually your repo root.
+# Default: the current working directory.
+RALPH_WORKSPACE="/workspace"
+
+# Task-list file the loop reads the "first unchecked task" from, relative to the
+# workspace. Default: tasks.md
+RALPH_TASKS="tasks.md"
+
+# Runtime state directory (heartbeat, per-turn logs, status feed, turn counter),
+# relative to the workspace. MUST be gitignored. Default: .ralph
+RALPH_STATE_DIR=".ralph"
+
+# (Meta) path to THIS config file. Set as an environment variable only, to point
+# the scripts at a config that is not ./ralph.conf. Default: ./ralph.conf
+# RALPH_CONF="/path/to/ralph.conf"
+
+# --- agent / turn behaviour --------------------------------------------------
+
+# Model id passed to `claude --model`. Leave empty to use the account default.
+RALPH_MODEL=""
+
+# Per-turn wall-clock cap in seconds. A turn exceeding it is killed and retried
+# (counts as a no-commit turn). Default: 1200 (20 min)
+RALPH_TURN_TIMEOUT="1200"
+
+# Consecutive no-commit turns before the loop halts for human review. Default: 2
+RALPH_MAX_STALLS="2"
+
+# Fallback wait, in seconds, when a usage-limit message has no parseable reset
+# time (until_reset.py could not read a clock time). Default: 900 (15 min)
+RALPH_LIMIT_POLL="900"
+
+# Inter-turn sleep in loop mode, in seconds. Default: 30
+RALPH_POLL_INTERVAL="30"
+
+# --- container probing (status digest + Makefile) ---------------------------
+
+# Name of the loop container the status digest probes for "is it running?", and
+# the image/container name the Makefile builds and runs. Default: ralph-loop
+RALPH_CONTAINER="ralph-loop"
+
+# Container runtime CLI. Default: podman. Docker can work, but the Makefile's
+# RUN_FLAGS use the Podman-specific `--userns=keep-id`; Docker users must adjust
+# those flags (drop it / use `--user`). The status digest is runtime-agnostic.
+RALPH_RUNTIME="podman"

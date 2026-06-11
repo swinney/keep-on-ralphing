@@ -1,0 +1,18 @@
+# Consumer Containerfile (template) — your project's loop sandbox.
+#
+# This is the WHOLE file an adopter needs: `FROM` the ralph base image (which
+# carries the loop machinery on PATH) and add your project's toolchain. The base
+# must be built first — in keep-on-ralphing, run `make build-base`.
+#
+# PLACEHOLDERS (the closed set):
+#   {{BASE_IMAGE}}         the ralph base tag (default: ralph-base:v1)
+#   {{TOOLCHAIN_INSTALL}}  one RUN block installing your project's deps + the
+#                          exact tools your gate command runs (formatter, linter,
+#                          type-checker, test runner), pinned
+
+FROM {{BASE_IMAGE}}
+
+# --- {{TOOLCHAIN_INSTALL}} : PROJECT-SPECIFIC — replace this block ----------
+# Example (Python): RUN pip install --no-cache-dir ruff mypy pytest
+{{TOOLCHAIN_INSTALL}}
+# --- end project-specific block ---------------------------------------------

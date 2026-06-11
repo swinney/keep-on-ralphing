@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# Ralph Loop runner — project-agnostic.
+#
+# Drives an LLM coding agent through a task list one turn at a time, using the
+# commit graph as the objective progress signal. Designed to run inside a
+# sandbox container (see the Containerfile/Makefile templates) but works on any
+# host with bash, git, and the `claude` CLI on PATH.
+#
+# Configuration (all optional; precedence: environment > ralph.conf > default):
+#   RALPH_WORKSPACE     project dir to operate in            (default: $PWD)
+#   RALPH_CONF          path to the config file to source    (default: ./ralph.conf)
+#   RALPH_TASKS         task-list file, relative to workspace (default: tasks.md)
+#   RALPH_STATE_DIR     runtime state dir, gitignored        (default: .ralph)
+#   RALPH_MODEL         passed to `claude --model`           (default: account default)
+#   RALPH_TURN_TIMEOUT  per-turn wall-clock cap, seconds     (default: 1200 = 20 min)
+#   RALPH_MAX_STALLS    consecutive no-commit turns to halt  (default: 2)
+#   RALPH_LIMIT_POLL    fallback wait on an unparseable limit (default: 900 = 15 min)
+#   RALPH_POLL_INTERVAL inter-turn sleep in loop mode, seconds (default: 30)
+#
+# Usage:
+#   ralph.sh            loop until STATUS.md gets a stop reason, SIGINT, or stall
+#   ralph.sh --once     run exactly ONE logged turn, then exit with its code
+#
+# Stop conditions (loop mode):
+#   * <workspace>/STATUS.md becomes NON-EMPTY with NEW content (the agent wrote a
+#     stop reason). A pre-existing breadcrumb does NOT stop a fresh loop.
+#   * RALPH_MAX_STALLS consecutive turns make no new commit (hung/timed-out or
+#     stuck-on-red) — the loop writes STATUS.md and exits 1 rather than spin.
+#   * SIGINT (Ctrl-C) from the operator.
+#
+# Resilience: each turn is wrapped in `timeout`, so a hung turn is killed and
+# retried next iteration; the loop only gives up after RALPH_MAX_STALLS in a row
+# produce no commit. A usage-limit turn is NOT a stall — the loop waits for the
+# window to refresh (until_reset.py parses the reset time; RALPH_LIMIT_POLL on a
+# parse miss) and replays the SAME task.
+#
+# State outputs (under $RALPH_STATE_DIR/, gitignored — read via the status script):
+#   log/turn-<n>.txt   per-turn output, line-buffered so `tail -f` is live
+#   current.json       heartbeat: the turn running right now
+#   status.jsonl       objective git-derived record appended per completed turn
+#   turn               turn counter
+
+set -uo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# --- config loading: environment > ralph.conf > built-in default ------------
+# Snapshot any RALPH_* already set in the environment as re-runnable assignments;
+# these win over the file. Uses printf %q + eval rather than an associative
+# array so the kit also runs on bash 3.2 (e.g. stock macOS).
+_env_override=$(
+  while IFS= read -r _v; do
+    printf '%s=%q\n' "$_v" "${!_v}"
+  done < <(compgen -v | grep '^RALPH_' || true)
+)
+
+conf="${RALPH_CONF:-ralph.conf}"
+# shellcheck disable=SC1090
+[ -f "$conf" ] && . "$conf"
+
+# Re-apply the environment overrides on top of whatever the file set.
+[ -n "$_env_override" ] && eval "$_env_override"
+
+cd "${RALPH_WORKSPACE:-$PWD}" || {
+  echo "ralph: cannot cd into RALPH_WORKSPACE='${RALPH_WORKSPACE:-$PWD}' — refusing to start" >&2
+  exit 1
+}
+
+# Preflight the external commands the loop assumes, so a missing tool fails fast
+# with a clear message instead of an opaque error mid-turn.
+for _cmd in git claude timeout; do
+  command -v "$_cmd" >/dev/null 2>&1 || {
+    echo "ralph: required command '$_cmd' not found on PATH — refusing to start" >&2
+    exit 1
+  }
+done
+
+once=0
+[ "${1:-}" = "--once" ] && once=1
+
+turn_timeout=${RALPH_TURN_TIMEOUT:-1200}
+max_stalls=${RALPH_MAX_STALLS:-2}
+limit_poll=${RALPH_LIMIT_POLL:-900}
+tasks_file=${RALPH_TASKS:-tasks.md}
+state_dir=${RALPH_STATE_DIR:-.ralph}
+poll_interval=${RALPH_POLL_INTERVAL:-30}
+
+if [ ! -f PROMPT.md ]; then
+  echo "ralph: PROMPT.md missing in $(pwd) — refusing to start" >&2
+  exit 1
+fi
+
+# Auth comes from the bind-mounted $HOME/.claude (populated by `make login`). If
+# it isn't there, refuse to start rather than burn turns waiting for an
+# interactive login that will never come.
+if [ ! -d "$HOME/.claude" ] || [ -z "$(ls -A "$HOME/.claude" 2>/dev/null)" ]; then
+  echo "ralph: $HOME/.claude is empty — run 'make login' on the host first" >&2
+  exit 1
+fi
+
+# Claude Code's config is ~/.claude.json — a SIBLING of ~/.claude (the only thing
+# we persist), so it's missing on every fresh container. Restore it from the
+# newest backup (kept inside the persisted .claude/backups) so each container
+# starts clean and quiet.
+if [ ! -f "$HOME/.claude.json" ]; then
+  newest_backup=$(ls -t "$HOME"/.claude/backups/.claude.json.backup.* 2>/dev/null | head -1)
+  if [ -n "$newest_backup" ]; then
+    cp "$newest_backup" "$HOME/.claude.json"
+  else
+    echo '{}' >"$HOME/.claude.json"
+  fi
+fi
+
+mkdir -p "$state_dir/log"
+turn_file="$state_dir/turn"
+turn=$(cat "$turn_file" 2>/dev/null || echo 0)
+
+model_args=()
+[ -n "${RALPH_MODEL:-}" ] && model_args=(--model "$RALPH_MODEL")
+
+head_rev() { git rev-parse HEAD 2>/dev/null || echo none; }
+
+# The first unchecked tasks.md task (what the upcoming turn should pick up).
+first_task() {
+  grep -m1 '^- \[ \] ' "$tasks_file" 2>/dev/null \
+    | sed -E 's/^- \[ \] *//; s/⛔ MILESTONE GATE.*/[milestone gate]/'
+}
+
+# Emit a status record from RJ_* env vars. mode=current overwrites the heartbeat
+# ($state_dir/current.json); mode=append adds a line to the objective,
+# git-derived feed ($state_dir/status.jsonl). No-op if python3 is unavailable.
+emit_status() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  RJ_MODE="$1" RJ_STATE_DIR="$state_dir" python3 - <<'PY' 2>/dev/null || true
+import json, os
+def opt(k):
+    v = os.environ.get(k, "")
+    return v if v else None
+rec = {
+    "turn": int(os.environ.get("RJ_TURN", "0")),
+    "task": os.environ.get("RJ_TASK", ""),
+    "model": opt("RJ_MODEL") or "default",
+    "state": os.environ.get("RJ_STATE", ""),
+    "started": opt("RJ_STARTED"),
+    "ended": opt("RJ_ENDED"),
+    "exit_code": int(os.environ["RJ_EXIT"]) if os.environ.get("RJ_EXIT") else None,
+    "committed": os.environ.get("RJ_COMMITTED") == "1",
+    "sha": opt("RJ_SHA"),
+    "subject": opt("RJ_SUBJECT"),
+}
+if os.environ["RJ_MODE"] == "current":
+    json.dump(rec, open(os.environ["RJ_STATE_DIR"] + "/current.json", "w"), indent=2)
+else:
+    with open(os.environ["RJ_STATE_DIR"] + "/status.jsonl", "a") as f:
+        f.write(json.dumps(rec) + "\n")
+PY
+}
+
+turn_ec=0
+run_turn() {
+  turn=$((turn + 1))
+  echo "$turn" >"$turn_file"
+  local log="$state_dir/log/turn-${turn}.txt"
+  local task started ended before after committed sha subject
+  task=$(first_task)
+  started=$(date -Is)
+  before=$(head_rev)
+
+  # Heartbeat: what is running right now.
+  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="${RALPH_MODEL:-}" RJ_STATE="running" \
+    RJ_STARTED="$started" emit_status current
+
+  echo "ralph: turn $turn ($started)${RALPH_MODEL:+ model=$RALPH_MODEL} timeout=${turn_timeout}s -> $log"
+  echo "ralph:   task -> ${task:-<none>}"
+  # stdbuf -oL line-buffers output so `tail -f` shows progress LIVE, not only
+  # when the turn ends. timeout sends TERM at the cap, then KILL 30s later.
+  stdbuf -oL -eL timeout -k 30 "$turn_timeout" \
+    claude -p --dangerously-skip-permissions "${model_args[@]}" <PROMPT.md 2>&1 | tee "$log"
+  turn_ec=${PIPESTATUS[0]}
+  [ "$turn_ec" -eq 124 ] && echo "ralph: turn $turn TIMED OUT after ${turn_timeout}s" | tee -a "$log"
+
+  after=$(head_rev)
+  committed=0
+  sha=""
+  subject=""
+  if [ "$before" != "$after" ]; then
+    committed=1
+    sha=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+    subject=$(git log -1 --format=%s 2>/dev/null || echo "")
+  fi
+  ended=$(date -Is)
+
+  # Objective, git-derived record of the completed turn.
+  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="${RALPH_MODEL:-}" RJ_STATE="done" \
+    RJ_STARTED="$started" RJ_ENDED="$ended" RJ_EXIT="$turn_ec" \
+    RJ_COMMITTED="$committed" RJ_SHA="$sha" RJ_SUBJECT="$subject" emit_status append
+  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="${RALPH_MODEL:-}" RJ_STATE="idle" \
+    RJ_STARTED="$started" RJ_ENDED="$ended" RJ_EXIT="$turn_ec" \
+    RJ_COMMITTED="$committed" RJ_SHA="$sha" RJ_SUBJECT="$subject" emit_status current
+
+  if [ "$committed" = 1 ]; then
+    echo "ralph: turn $turn exited $turn_ec ($ended) — committed $sha: $subject" | tee -a "$log"
+  else
+    echo "ralph: turn $turn exited $turn_ec ($ended) — no commit" | tee -a "$log"
+  fi
+}
+
+trap 'echo; echo "ralph: caught SIGINT at turn $turn, exiting"; exit 130' INT
+
+if [ "$once" -eq 1 ]; then
+  echo "ralph: single turn (--once) starting from turn $turn"
+  run_turn
+  echo "ralph: --once complete — log at $state_dir/log/turn-${turn}.txt"
+  exit "$turn_ec"
+fi
+
+echo "ralph: starting at turn $turn ($(date -Is)) — timeout ${turn_timeout}s, max-stalls ${max_stalls}"
+
+# STATUS.md is BOTH the loop's stop-signal and the human cold-start breadcrumb,
+# so it is normally non-empty when a loop starts. Snapshot it now and treat only
+# a CHANGE to non-whitespace content as a stop reason — a pre-existing breadcrumb
+# must not halt a fresh loop after a single turn.
+status_start="$(cat STATUS.md 2>/dev/null || true)"
+stalls=0
+while true; do
+  before=$(head_rev)
+  run_turn
+  after=$(head_rev)
+
+  # Usage-limit pause (before the stall check): a rate-limited turn exits
+  # non-zero and prints "hit your … limit · resets <time>" but makes no commit,
+  # so it must NOT count toward max-stalls. Wait for the window to refresh, then
+  # replay the SAME task. A genuine timeout (124) with no limit message falls
+  # through to the stall logic.
+  last_log="$state_dir/log/turn-${turn}.txt"
+  if [ "$turn_ec" -ne 0 ] &&
+    grep -qiE "hit your (session|weekly|opus|usage) limit" "$last_log" 2>/dev/null; then
+    reset=$(grep -oiE "resets [^.]*" "$last_log" | head -1)
+    wait_s=$(python3 "$script_dir/until_reset.py" "$reset" 2>/dev/null || echo "$limit_poll")
+    echo "ralph: usage limit hit at turn $turn (${reset:-reset time unknown}) — pausing ${wait_s}s, then retrying (not a stall)"
+    sleep "$wait_s"
+    turn=$((turn - 1)) # replay this turn number — the task was not completed
+    echo "$turn" >"$turn_file"
+    continue
+  fi
+
+  # Stop only on a stop-reason written DURING this run. STATUS.md doubles as the
+  # human breadcrumb, so it is usually non-empty at startup; halting on any
+  # non-empty file would stop a fresh loop after a single turn. Compare against
+  # the startup snapshot and stop only when a turn CHANGED it to non-whitespace
+  # content (a blank/whitespace-only write must still NOT trip a stop).
+  status_now="$(cat STATUS.md 2>/dev/null || true)"
+  if [ -n "${status_now//[[:space:]]/}" ] && [ "$status_now" != "$status_start" ]; then
+    echo "ralph: STATUS.md updated with a stop reason at turn $turn — stopping"
+    echo "--- STATUS.md ---"
+    cat STATUS.md
+    exit 0
+  fi
+
+  if [ "$before" = "$after" ]; then
+    stalls=$((stalls + 1))
+    echo "ralph: turn $turn produced NO commit (stall ${stalls}/${max_stalls}, exit ${turn_ec})"
+    if [ "$stalls" -ge "$max_stalls" ]; then
+      printf 'Loop halted: %d consecutive turns made no commit (last exit %d — hung/timed-out or stuck-on-red). Human review needed.\n' \
+        "$stalls" "$turn_ec" >STATUS.md
+      echo "ralph: ${stalls} consecutive no-progress turns — wrote STATUS.md, stopping"
+      exit 1
+    fi
+  else
+    stalls=0
+  fi
+
+  sleep "$poll_interval"
+done

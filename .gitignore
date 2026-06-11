@@ -1,0 +1,7 @@
+# Python test caches from the kit's own test suite.
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Ralph loop runtime state, if you ever run a loop from within this repo.
+.ralph/

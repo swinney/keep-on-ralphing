@@ -1,0 +1,11 @@
+{
+  "name": "keep-on-ralphing",
+  "owner": { "name": "Austin Swinney" },
+  "plugins": [
+    {
+      "name": "ralph-harness",
+      "source": "./",
+      "description": "Spec-driven Ralph loop harness: /ralph-init scaffolds a project's loop config; /ralph-status reports loop state. Backed by the ralph-base podman image."
+    }
+  ]
+}

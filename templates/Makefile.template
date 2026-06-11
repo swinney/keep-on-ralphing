@@ -1,0 +1,63 @@
+# Consumer Makefile (template) — build your loop image and drive the loop.
+#
+# The loop machinery lives in the base image (on PATH), so there is no scripts/
+# in your repo and the loop target just runs `ralph.sh`. Status is the
+# /ralph-status Claude Code skill, not a shell script.
+#
+# Fill the placeholders to match your ralph.conf. All stay overridable on the
+# command line, e.g. `make loop IMAGE=my-loop`.
+#
+# PLACEHOLDERS (the closed set):
+#   {{CONTAINER_IMAGE}}  this project's loop image name (match ralph.conf RALPH_CONTAINER)
+#   {{RUNTIME}}          container CLI (match ralph.conf RALPH_RUNTIME; e.g. podman)
+
+IMAGE      ?= {{CONTAINER_IMAGE}}
+RUNTIME    ?= {{RUNTIME}}
+BASE_IMAGE ?= ralph-base:v1
+WORKSPACE  := $(CURDIR)
+CLAUDE_DIR := $(WORKSPACE)/.ralph/claude-home
+
+# --userns=keep-id is PODMAN-SPECIFIC (host UID/GID mapping). If RUNTIME=docker,
+# drop it or replace with `--user $$(id -u):$$(id -g)`.
+RUN_FLAGS := \
+  --userns=keep-id \
+  -e RALPH_MODEL \
+  -v $(WORKSPACE):/workspace \
+  -v $(CLAUDE_DIR):/home/claude/.claude
+
+.PHONY: help build login loop loop-once shell clean
+
+help:
+	@echo "Targets:"
+	@echo "  build      build $(IMAGE) FROM $(BASE_IMAGE) (run keep-on-ralphing 'make build-base' first)"
+	@echo "  login      one-time: authenticate Claude Code"
+	@echo "  loop       run the Ralph Loop in the foreground (Ctrl-C to stop)"
+	@echo "  loop-once  run exactly one turn"
+	@echo "  shell      interactive shell in the container"
+	@echo "  clean      remove $(IMAGE)"
+	@echo "  (status:   use the /ralph-status skill in Claude Code)"
+
+build:
+	$(RUNTIME) build \
+	  --build-arg USER_UID=$$(id -u) \
+	  --build-arg USER_GID=$$(id -g) \
+	  -t $(IMAGE) -f Containerfile .
+
+login:
+	@mkdir -p $(CLAUDE_DIR)
+	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE)-login $(IMAGE) claude login
+
+loop:
+	@mkdir -p $(CLAUDE_DIR)
+	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE) $(IMAGE) ralph.sh
+
+loop-once:
+	@mkdir -p $(CLAUDE_DIR)
+	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE)-once $(IMAGE) ralph.sh --once
+
+shell:
+	@mkdir -p $(CLAUDE_DIR)
+	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE)-shell $(IMAGE)
+
+clean:
+	$(RUNTIME) rmi $(IMAGE) || true

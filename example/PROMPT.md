@@ -1,0 +1,59 @@
+# Ralph Loop: Acme Widgets
+
+You are building this project iteratively. Each invocation, do ONE task.
+
+Your ENTIRE job this invocation is the first unchecked task in /tasks.md —
+nothing else. Do not do work that is not that task: no memory management, no
+unrequested refactors, no documentation side-quests, no reorganizing. If the
+task is small, finish it and stop; do not look for extra things to do.
+
+## Workflow
+1. Read /docs/specs/ to understand the architecture
+2. Read /tasks.md and pick the first unchecked task
+3. If the task requires a spec that doesn't exist, write the spec first
+   in /docs/specs/<system>.md and stop. Mark task progress, commit, exit.
+4. If the spec exists but tests don't, write the test suite in
+   /tests/<system>/ derived from the spec. Stop. Commit. Exit.
+5. If tests exist but fail or are missing implementation, implement
+   until all tests pass. Then commit. Exit.
+6. Before any commit, run the FULL gate in CI order and fix any failure
+   before committing (do not commit red):
+   `ruff format . && ruff check . && mypy . && pytest`
+   Run the gate exactly as CI does — if CI checks formatting, you must
+   actually FORMAT (not just check): a correct, passing-tests commit still
+   fails CI if it is unformatted.
+7. Mark the task complete in /tasks.md if and only if the full
+   spec→test→implementation cycle for it is done and green.
+
+## Conventions
+- Prefer existing, well-tested libraries over bespoke code; document any
+  adopt/reject choice in /docs/decisions/
+- One subsystem per commit; commit messages reference the task
+- End each commit message with a trailer line `Ralph-Task: <the tasks.md task
+  this commit completes>` so git history links cleanly to the task list
+- Do NOT add a `Co-Authored-By` trailer (or any AI/assistant attribution) to
+  commits
+- Remove ALL temporary debugging scaffolding before committing — `print()`,
+  ad-hoc logging, diagnostics, etc. Such scaffolding must never land in a
+  commit. If a test is failing, fix the cause; do not leave probes behind.
+- Never modify another subsystem's tests to make your code pass
+
+## Stop conditions
+- If /tasks.md is fully checked, write "RALPH: project complete"
+  to /STATUS.md and exit
+- If you encounter a decision not covered by specs, write the
+  question to /docs/questions.md and exit without committing code
+- If tests have been red for 3 consecutive commits on the same task,
+  write to /STATUS.md and exit for human review
+
+## Important
+- Do not invent requirements not in the specs
+- Do not skip the spec or test phase to get to implementation faster
+- Do not modify /docs/specs/ to match your implementation; modify
+  the implementation to match the spec, or escalate via /docs/questions.md
+- NEVER write to /STATUS.md except exactly as the Stop conditions specify,
+  and when you do, write a non-empty one-line reason — never a blank or
+  whitespace-only file (a blank STATUS.md falsely signals the loop to stop)
+- A single focused implementation is preferred. Do not spin up multi-agent
+  workflows/subagents for a routine single-module task — it costs more than
+  it's worth and this is one task per invocation

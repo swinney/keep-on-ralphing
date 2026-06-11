@@ -1,0 +1,56 @@
+# Ralph base sandbox image.
+#
+# The container boundary is what makes `claude --dangerously-skip-permissions`
+# acceptable: the agent can do anything, but only to a bind-mounted workspace in
+# a throwaway container. This is the GENERIC base — it bakes the loop machinery
+# onto PATH so a consuming project never copies scripts; the consumer's own
+# Containerfile just `FROM`s this and adds its toolchain.
+#
+# Scope: Linux + podman, single architecture. Not multi-arch, macOS, Windows, or
+# Docker-tested (see README).
+#
+# Build (from the repo root): `make build-base`  →  tags  ralph-base:v1
+#
+# python:3.12-slim is the base because the runner itself needs python3
+# (status emission + until_reset.py); consumers layer their own language on top.
+
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8
+
+# Generic system tools the harness needs.
+#   git              repo operations from inside the loop
+#   curl, ca-certs   ad-hoc fetches, TLS
+#   tmux             occasionally useful for attaching to a stuck session
+#   nodejs, npm      required to install Claude Code via npm
+#   coreutils        timeout/stdbuf used by the runner (present in slim, pinned explicit)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        ca-certificates \
+        tmux \
+        nodejs \
+        npm \
+        coreutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code, installed globally so `claude` is on PATH for any user.
+RUN npm install -g @anthropic-ai/claude-code
+
+# The loop machinery, baked onto PATH. This is the single source of the runner;
+# consumers get it from the image, never by vendoring scripts/.
+COPY scripts/ralph.sh scripts/until_reset.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/ralph.sh /usr/local/bin/until_reset.py
+
+# Non-root user whose UID/GID match the invoking host user (override with
+# --build-arg). With rootless Podman this makes files written under /workspace
+# come out owned by you on the host.
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN groupadd -g ${USER_GID} claude \
+    && useradd -m -u ${USER_UID} -g ${USER_GID} -s /bin/bash claude
+
+USER claude
+WORKDIR /workspace
+CMD ["bash"]

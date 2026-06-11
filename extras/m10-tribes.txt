@@ -1,0 +1,7 @@
+# M10 cave-tribe units (one independent fan-out unit per line).
+# The orc rivalry (Vile Rune + Decapitator) is ONE unit — the two tribes are interdependent.
+orc
+goblin
+hobgoblin
+bugbear
+gnoll

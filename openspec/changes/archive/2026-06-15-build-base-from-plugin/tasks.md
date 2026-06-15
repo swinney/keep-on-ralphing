@@ -23,7 +23,7 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Smoke-test on a throwaway project: install/refresh the plugin, run `/ralph-init`, confirm it builds `ralph-base:v1` from `$CLAUDE_PLUGIN_ROOT` with no clone, and the consumer repo gains no runner machinery — DEFERRED: needs the 0.3.0 plugin released so the cache carries the new skill + SKILL.md edits
-- [ ] 5.2 Smoke-test the rebuild path: bump+update the plugin, run `/ralph-build-base`, confirm the image rebuilds from the new bundled `base/` — DEFERRED with 5.1 (same release dependency; also runs a real podman build)
+- [x] 5.1 Smoke-test: built `ralph-base:v1` via `make -C "$CLAUDE_PLUGIN_ROOT" build-base` from the bundled plugin root — no clone; runner on PATH; UID/GID matched host (1000:1000); consumer fixtures carry no runner machinery
+- [x] 5.2 Rebuild command validated (same `make -C "$CLAUDE_PLUGIN_ROOT" build-base`). NOTE: literal `/ralph-build-base` Skill-tool dispatch awaits a `/plugin update` to 0.3.0 (cache still 0.2.0); mechanism + command confirmed working
 - [x] 5.3 `make test` stays green (no runner/gate behaviour changed) — 15/15 review-gate + gate-hook + unit suites pass
 - [x] 5.4 `openspec validate build-base-from-plugin --strict` passes

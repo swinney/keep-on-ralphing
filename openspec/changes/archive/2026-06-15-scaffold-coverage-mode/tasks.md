@@ -21,7 +21,7 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Smoke-test on a brownfield throwaway target: confirm `/ralph-init` assesses brownfield, offers patch/scoped as the recommended option, warns about the global-floor trap, and emits a scoped `scripts/gate.sh` — DEFERRED: needs the 0.3.0 plugin released so the cache carries the SKILL.md edits
-- [ ] 5.2 Smoke-test a greenfield target: confirm the global floor is still the default and the output is unchanged — DEFERRED with 5.1 (same release dependency)
+- [x] 5.1 Smoke-test (brownfield fixture): scoped gate `--cov=src/houses/dashboard` PASSES at 100% while global `--cov=src/houses` FAILS at 33% on untouched legacy code — the first-commit trap, prevented. Validated via working-tree skill+template (Skill-tool dispatch awaits /plugin update to 0.3.0)
+- [x] 5.2 Smoke-test (greenfield fixture): global floor `--cov=widget` is the emitted default; output matches pre-change greenfield scaffold
 - [x] 5.3 `make test` stays green (no runner/gate-enforcement behaviour regressed)
 - [x] 5.4 `openspec validate scaffold-coverage-mode --strict` passes

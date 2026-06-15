@@ -35,17 +35,19 @@ The harness splits by *where each piece runs*:
 
 ## Use it on a project
 
-**One-time, this repo:**
-```sh
-git clone https://github.com/swinney/keep-on-ralphing
-cd keep-on-ralphing && make build-base      # builds ralph-base:v1 (registry-free)
-```
-
 **Install the plugin (Claude Code):**
 ```
 /plugin marketplace add swinney/keep-on-ralphing
 /plugin install ralph-harness@keep-on-ralphing
 ```
+
+**Build the base image once — no clone, it ships with the plugin:**
+```
+/ralph-build-base    # builds ralph-base:v1 from the plugin's bundled base/ (registry-free)
+```
+The plugin bundles `base/` + the `Makefile`, so the image builds straight from the
+install. Re-run `/ralph-build-base` after a `/plugin update` that touched the runner.
+(Contributors working from a `keep-on-ralphing` checkout can `make build-base` instead.)
 
 **In your project:**
 ```
@@ -94,12 +96,19 @@ review, set `RALPH_REVIEW_GATE=0`.
 
 ## The base image
 
-`make build-base` builds `ralph-base:v1` locally from `base/Containerfile`
-(no registry). It is `python:3.12-slim` + git/node/Claude Code + the runner
-machinery on PATH + a UID/GID-matched non-root user (so bind-mounted files are
-host-owned under rootless podman). A consumer's Containerfile is just
-`FROM ralph-base:v1` plus its own toolchain. Pushing to a registry (GHCR) is an
-optional later add — never required.
+`ralph-base:v1` is built locally from `base/Containerfile` (no registry). It is
+`python:3.12-slim` + git/node/Claude Code + the runner machinery on PATH + a
+UID/GID-matched non-root user (so bind-mounted files are host-owned under rootless
+podman). A consumer's Containerfile is just `FROM ralph-base:v1` plus its own
+toolchain. Pushing to a registry (GHCR) is an optional later add — never required.
+
+The build material ships **inside the plugin** (`base/` + the `Makefile`), so
+`/ralph-build-base` builds the image clone-free via
+`make -C "$CLAUDE_PLUGIN_ROOT" build-base`; a `keep-on-ralphing` checkout can run
+`make build-base` directly. Because the runner travels with the plugin, a
+`/plugin update` + `/ralph-build-base` keeps the image in lockstep with the
+installed plugin — resolve `$CLAUDE_PLUGIN_ROOT` at build time (the versioned plugin
+cache is pruned after an update), never a frozen cache path.
 
 ## Configuration
 

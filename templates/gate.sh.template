@@ -20,13 +20,27 @@
 # if it is unformatted.
 #
 # Gate COVERAGE, not just test pass/fail: "tests pass" is not "the code is tested."
-# The default is a GLOBAL coverage floor (project-wide % must meet the threshold),
-# which is portable across tools and fits a project grown test-first. For a
-# brownfield repo where one legacy untested module would tank the global number,
-# switch to PATCH/diff coverage (gate only the lines this change touched, e.g.
-# `diff-cover`). Coverage is a SUPPORTING gate — it catches lazy/trivial tests, but
-# not tests that fake the precondition that matters; the independent-review gate
-# catches that class.
+# Two modes — pick one to confirm with /ralph-init:
+#
+#   GLOBAL floor (default for GREENFIELD): the project-wide % must meet the
+#   threshold. Portable across tools, fits a project grown test-first. E.g.
+#     pytest --cov=<pkg> --cov-fail-under=80
+#
+#   PATCH/SCOPED (recommended for BROWNFIELD — adding a feature to an existing,
+#   under-covered codebase): gate only the code this work touches, so legacy
+#   untested modules don't tank the number and fail your first commit. Scope to
+#   the new paths (simplest, tool-native):
+#     Python   pytest --cov=<new_pkg_or_path> --cov-fail-under=80
+#     vitest   vitest run --coverage --coverage.include='<feature-dir>/**' \
+#                --coverage.thresholds.lines=80
+#     go       go test -cover ./<feature-pkg>/...
+#   Or true diff coverage against the base branch (stricter, needs a tool + base
+#   ref): generate an lcov/coverage.xml report, then `diff-cover` it.
+#
+# Coverage is a SUPPORTING gate — it catches lazy/trivial tests, but not tests that
+# fake the precondition that matters; the independent-review gate catches that class
+# and is also the backstop for scoped coverage's blind spot (changes outside the
+# scoped path).
 
 set -euo pipefail
 

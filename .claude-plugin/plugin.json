@@ -1,7 +1,7 @@
 {
   "name": "ralph-harness",
   "description": "Spec-driven Ralph loop harness: scaffold (/ralph-init) and monitor (/ralph-status) an autonomous one-task-per-turn coding loop for any project, backed by a podman base image.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": { "name": "Austin Swinney" },
   "homepage": "https://github.com/swinney/keep-on-ralphing",
   "repository": "https://github.com/swinney/keep-on-ralphing",

@@ -30,6 +30,10 @@ plugin install path and read `templates/` under it:
 The fully-resolved `example/` directory in the same plugin is your golden
 reference for what good output looks like.
 
+The plugin also bundles `base/` (the base-image `Containerfile` + the runner
+scripts) and the root `Makefile`, so the `ralph-base:v1` image can be built from
+`$CLAUDE_PLUGIN_ROOT` without a separate source clone — see §4.
+
 ## 1. Confirm the target
 
 Run in the **target project's repo root** (the repo you want the loop to build —
@@ -45,14 +49,29 @@ Gather these, reading the repo; state each as "inferred X" or ask if unsure:
 - **Specs dir** — look for `docs/specs/`, `specs/`, `openspec/`; default `docs/specs`.
 - **Tests dir** — look for `tests/`, `test/`; default `tests`.
 - **Decisions dir** — look for `docs/decisions/`; default `docs/decisions`.
+- **Greenfield vs brownfield** — assess the target with cheap signals: pre-existing
+  source beyond the feature being added, an existing test suite of unknown coverage,
+  an existing lockfile/CI, or the loop targeting a feature subdir of a larger app
+  (e.g. tasks under `openspec/changes/<feature>/`). Little/no prior source →
+  greenfield; anything else, or unclear → treat as brownfield. Do NOT run the test
+  suite to measure coverage. This assessment drives the coverage-mode recommendation.
 - **Gate command** — read CI (`.github/workflows/*.yml`) for the lint/type/test
   sequence; otherwise infer from the toolchain. The gate MUST include a
-  test-COVERAGE check with a threshold, not just a test run (e.g. Python →
-  `ruff format . && ruff check . && mypy . && pytest --cov=<pkg> --cov-fail-under=80`).
-  Default to a GLOBAL coverage floor; for a brownfield repo, prefer PATCH/diff
-  coverage instead (note this to the user). This MUST match what CI runs, in CI
-  order. **Confirm the gate AND the coverage threshold with the user** — a wrong or
-  too-aggressive threshold blocks every commit.
+  test-COVERAGE check with a threshold, not just a test run. This MUST match what CI
+  runs, in CI order. **Confirm the gate, the coverage threshold, AND the coverage
+  MODE with the user** — a wrong/too-aggressive value, or the wrong mode, blocks
+  every commit. The coverage-MODE choice you present MUST always include patch/scoped
+  coverage (gating only the lines/paths a turn changed) as a first-class option — not
+  only "global floor vs none". Order the recommended option by the assessment:
+    - **Greenfield → recommend a GLOBAL floor**, e.g.
+      `ruff format . && ruff check . && mypy . && pytest --cov=<pkg> --cov-fail-under=80`.
+    - **Brownfield → recommend PATCH/SCOPED coverage**: coverage limited to the changed
+      package/paths — Python `pytest --cov=<new_pkg>`, vitest
+      `--coverage.include='<feature-dir>/**' --coverage.thresholds.lines=<N>`, or
+      `go test -cover ./<feature-pkg>/...`; true diff-coverage (`diff-cover` vs the base
+      branch) is the stricter alternative. **Warn** that a GLOBAL floor on an
+      under-covered existing codebase fails the very first commit. Never silently pick a
+      global floor the codebase does not already meet; leave the final mode to the user.
 - **Toolchain install** — the exact tools the gate command invokes, INCLUDING the
   coverage tool (e.g. `pytest-cov`), as a `RUN`/install block for the Containerfile
   (pin versions where you can read them from lockfiles/config). Add the same
@@ -172,28 +191,52 @@ must not be committed.
   feature branch). If they instead want an offline loop with no review, the
   opt-out is `RALPH_REVIEW_GATE=0` in `ralph.conf`.
 - Tell the user the next steps explicitly:
-  1. In a clone of `keep-on-ralphing`: `make build-base` (builds `ralph-base:v1`).
+  1. Build the base image `ralph-base:v1` from the plugin's **bundled** `base/` —
+     no clone needed: `make -C "$CLAUDE_PLUGIN_ROOT" build-base`. The plugin ships
+     `base/` and the root `Makefile`, so this builds the same image the source repo
+     does (registry-free, host UID/GID-matched). Contributors working from a
+     `keep-on-ralphing` checkout can run `make build-base` there instead.
   2. In this project: `make build` (also installs the gate hook), then `make login`
      (one-time), then `make loop`.
   3. Confirm the CI workflow's toolchain-setup block matches the Containerfile.
-- Offer to run `make build` for them (and `make build-base` if they have the
-  keep-on-ralphing repo locally). Do not run `make loop` unattended unless asked.
+- Offer to build `ralph-base:v1` for them now from the bundled base —
+  `make -C "$CLAUDE_PLUGIN_ROOT" build-base` — and to run `make build` here. If
+  `$CLAUDE_PLUGIN_ROOT` is unset, or `make`/the container runtime is missing, say
+  which precondition is unmet and fall back to printing the explicit
+  `podman build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g) -t
+  ralph-base:v1 -f "$CLAUDE_PLUGIN_ROOT/base/Containerfile" "$CLAUDE_PLUGIN_ROOT/base"`
+  (or a source-clone build) — never skip the build silently, or the user hits a
+  missing-image error at `make loop`. Do not run `make loop` unattended unless asked.
+- After a `/plugin update` that touched the runner (`base/`), the base image is
+  stale: tell the user to run **`/ralph-build-base`** to rebuild `ralph-base:v1`
+  from the freshly-installed bundled `base/`.
 
 ## Guardrails
 - Never write the loop *machinery* (`ralph.sh`, `until_reset.py`) into the target
   repo — it comes from the image. `scripts/gate.sh` is the one exception that is
   NOT machinery: it is project-OWNED config (this project's own gate command),
   analogous to `ralph.conf`. Writing it is correct; vendoring the runner is not.
+- Building `ralph-base:v1` from the plugin's bundled `base/` (`$CLAUDE_PLUGIN_ROOT`)
+  is **read-only build context**, NOT vendoring: it reads the bundled sources to
+  produce the image and copies nothing into the target repo. Do not copy `base/`,
+  the base `Containerfile`, or the runner scripts into the consumer — the single
+  source stays the plugin's `base/`. Resolve `$CLAUDE_PLUGIN_ROOT` at build time;
+  never write a version-pinned plugin cache path into a generated file (the
+  per-version cache dir is pruned after an update).
 - The generated config must run headless (no interactive prompt) after the
   one-time `make login`.
 - Do not invent a gate command — read it from CI / confirm with the user. A wrong
   gate is the most damaging thing you can scaffold (it is now enforced by a hook
   AND CI, so a wrong gate blocks every commit).
 - The gate MUST include a coverage threshold, but never set it aggressively by
-  fiat — confirm the number with the user (a too-high threshold blocks every
-  commit). Coverage is a SUPPORTING gate: it catches lazy/trivial tests, not tests
-  that fake the precondition that matters — the independent-review gate and
-  real-artifact verification are what catch that class. Say so; don't oversell it.
+  fiat — confirm the number AND the mode with the user (a too-high threshold, or a
+  global floor on an under-covered brownfield repo, blocks every commit). Always
+  offer patch/scoped coverage as a first-class option; recommend it for a brownfield
+  target and a global floor for greenfield. Coverage is a SUPPORTING gate: it catches
+  lazy/trivial tests, not tests that fake the precondition that matters — the
+  independent-review gate and real-artifact verification are what catch that class,
+  and the review gate is also the backstop for scoped coverage's blind spot (changes
+  outside the scoped path). Say so; don't oversell it.
 - The CI workflow's `{{TOOLCHAIN_INSTALL}}` is best-effort — CI runner setup can't
   be fully inferred. Always flag it for the user to confirm against the Containerfile.
 - Never overwrite existing files/dirs; preserve and report them as skipped.

@@ -8,7 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 LLM coding agent through a task list one turn at a time, in a sandbox container, using
 the **commit graph as the objective progress signal**. This repo is *not* a consumer
 project; it is the thing other projects install. Keep that distinction front of mind:
-the `/ralph-init` and `/ralph-status` skills operate on a *target* repo, never on this one.
+the `/ralph-init`, `/ralph-status`, and `/ralph-build-base` skills act on a *target* repo
+(or, for `/ralph-build-base`, the installed plugin's own bundled `base/`), never on this one.
 
 Scope is deliberately narrow: **Linux + podman, single architecture, team-shared via
 GitHub.** Not multi-arch, not macOS/Windows, not Docker-tested.

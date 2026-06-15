@@ -20,15 +20,16 @@ words live. Bold = a phrase worth landing verbatim. ~4–5 min.
 - **Base container image** — the sandbox
   - agent runs with permissions skipped → only safe because it's a **throwaway container + your bind-mounted repo**
   - bakes the runner onto PATH → **your project carries no machinery, it inherits it**
-- **Claude Code plugin** — two commands
+- **Claude Code plugin** — three commands
   - `/ralph-init` — reads your repo, infers gate command from CI + toolchain, writes a small config
   - `/ralph-status` — "how's the loop doing": current turn, last commit, stalled?
+  - `/ralph-build-base` — builds the base image from the plugin's bundled `base/` (no clone)
 - **Per-project config** — the only thing in your repo; thin, generated, not hand-maintained
 - Payoff line: **fix the runner once in the base image, every project gets it for free — no drift**
 
 ### 4. How you'd use it (the whole path)
-- clone + `make build-base` (once)
 - install plugin (2 lines in Claude Code)
+- `/ralph-build-base` (once) — builds the base image from the bundled plugin, no clone
 - in your project: `/ralph-init` → `make build` → `make login` (once) → `make loop`
 - runs until: task list done / a stop condition / Ctrl-C
 

@@ -15,9 +15,9 @@ The harness splits by *where each piece runs*:
 ```
    IN-CONTAINER            HOST-SIDE (Claude Code)        IN-REPO (data)
    ────────────            ──────────────────────         ──────────────
-   the loop runner    →    /ralph-init   (scaffold)   →   ralph.conf  PROMPT.md
-   (ralph.sh,              /ralph-status (report)         tasks.md    STATUS.md
-    until_reset.py)                                       scripts/gate.sh + hook
+   the loop runner    →    /ralph-init      (scaffold)  →   ralph.conf  PROMPT.md
+   (ralph.sh,              /ralph-status    (report)        tasks.md    STATUS.md
+    until_reset.py)        /ralph-build-base (build img)    scripts/gate.sh + hook
    ⇒ base/ image          ⇒ skills/ (this plugin)         .github/workflows/ci.yml
                                                           specs/ tests/ decisions/
                                                           thin Containerfile + Makefile
@@ -28,7 +28,9 @@ The harness splits by *where each piece runs*:
   PATH, so a consuming project carries **no** machinery; its Containerfile just
   `FROM`s the base. One source of the runner → no drift.
 - **`skills/`** — the Claude Code plugin: `/ralph-init` scaffolds a project's
-  config from `templates/`; `/ralph-status` reports loop state from `.ralph/`.
+  config from `templates/`; `/ralph-status` reports loop state from `.ralph/`;
+  `/ralph-build-base` builds `ralph-base:v1` from the plugin's bundled `base/`
+  (clone-free).
 - **`templates/` + `example/`** — the per-project config surface and a fully
   resolved sample.
 - **`extras/`** — unsupported odds and ends (see its README).

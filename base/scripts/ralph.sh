@@ -17,9 +17,11 @@
 #   RALPH_LIMIT_POLL    fallback wait on an unparseable limit (default: 900 = 15 min)
 #   RALPH_POLL_INTERVAL inter-turn sleep in loop mode, seconds (default: 30)
 #
-# Outer-loop review gate (opt-in; all default OFF — the loop is offline-only
-# until you turn this on, and then it needs a git remote + an authenticated gh):
-#   RALPH_REVIEW_GATE      1 to push -> PR -> independent review after a commit  (default: 0)
+# Outer-loop review gate. RALPH_REVIEW_GATE is ON by default — independent review
+# is the highest-value gate — so loop mode needs a git remote + an authenticated
+# gh + a non-base working branch, and REFUSES to start without them. Set
+# RALPH_REVIEW_GATE=0 to run the offline inner loop only.
+#   RALPH_REVIEW_GATE      1 to push -> PR -> independent review after a commit  (default: 1, ON)
 #   RALPH_AUTO_MERGE       1 to merge a PASSED PR; else park it for a human      (default: 0)
 #   RALPH_REVIEW_MAX_ROUNDS consecutive finding-producing rounds before halt     (default: 3)
 #   RALPH_BASE_BRANCH      PR base branch; empty = origin's default branch       (default: auto)
@@ -165,7 +167,7 @@ else:
 PY
 }
 
-# --- outer-loop review gate (opt-in: RALPH_REVIEW_GATE=1) --------------------
+# --- outer-loop review gate (ON by default; set RALPH_REVIEW_GATE=0 to disable) 
 # ALL GitHub interaction lives here, in the runner — the coding agent never
 # touches git remotes, gh, or PRs, so the gate works no matter which agent runs
 # in the container. Review findings re-enter the agent's world only as text in
@@ -354,7 +356,7 @@ echo "ralph: starting at turn $turn ($(date -Is)) — timeout ${turn_timeout}s, 
 # Outer-loop review gate preflight (opt-in). All remote work is the runner's, so
 # fail fast if its preconditions are unmet rather than silently skipping the gate.
 review_rounds=0
-if [ "${RALPH_REVIEW_GATE:-0}" = 1 ]; then
+if [ "${RALPH_REVIEW_GATE:-1}" = 1 ]; then
   command -v gh >/dev/null 2>&1 ||
     { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not on PATH — refusing to start" >&2; exit 1; }
   gh auth status >/dev/null 2>&1 ||
@@ -416,7 +418,7 @@ while true; do
   # Outer-loop review gate: only when enabled AND this turn committed (there is
   # something new to review). A committing turn is not a stall, and the gate's
   # verdict wait never reaches the stall check below.
-  if [ "${RALPH_REVIEW_GATE:-0}" = 1 ] && [ "$before" != "$after" ]; then
+  if [ "${RALPH_REVIEW_GATE:-1}" = 1 ] && [ "$before" != "$after" ]; then
     run_review_gate
     if [ "$REVIEW_GATE_HALT" = 1 ]; then
       echo "ralph: review gate exhausted its rounds at turn $turn — wrote STATUS.md, stopping"

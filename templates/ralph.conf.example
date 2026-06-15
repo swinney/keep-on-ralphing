@@ -46,21 +46,22 @@ RALPH_LIMIT_POLL="900"
 # Inter-turn sleep in loop mode, in seconds. Default: 30
 RALPH_POLL_INTERVAL="30"
 
-# --- outer-loop review gate (OPT-IN — all OFF by default) --------------------
+# --- outer-loop review gate (ON by default — this loop is GitHub-dependent) --
 #
-# When ON, after a turn commits the loop (the RUNNER, never the agent) pushes the
-# branch, ensures a PR, requests an independent review, and reads the verdict:
-# PASS = zero findings AND green CI. Findings are written to review-findings.md
-# and become the agent's top-priority work next turn; persistent findings halt
-# the loop after RALPH_REVIEW_MAX_ROUNDS for a human. The container agent stays
-# GitHub-blind, so this works with any coding agent. Leaving the gate OFF keeps
-# the loop fully offline (no remote, no gh needed) — the zero-config default.
+# After a turn commits, the loop (the RUNNER, never the agent) pushes the branch,
+# ensures a PR, requests an independent review, and reads the verdict: PASS = zero
+# findings AND green CI. Findings are written to review-findings.md and become the
+# agent's top-priority work next turn; persistent findings halt the loop after
+# RALPH_REVIEW_MAX_ROUNDS for a human. The container agent stays GitHub-blind, so
+# this works with any coding agent.
 #
-# Turning this ON requires: a git remote, an authenticated `gh`, and the loop
-# running on a NON-base feature branch.
+# Because it is ON by default, loop mode REQUIRES a git remote, an authenticated
+# `gh`, and a NON-base feature branch, and REFUSES to start without them
+# (/ralph-init ensures these up front). Set RALPH_REVIEW_GATE=0 only if you
+# explicitly want the offline inner loop with no review.
 
-# 1 to enable the push -> PR -> review -> verdict cycle. Default: 0 (off)
-RALPH_REVIEW_GATE="0"
+# 1 enables the push -> PR -> review -> verdict cycle; 0 = offline inner loop. Default: 1 (ON)
+RALPH_REVIEW_GATE="1"
 
 # 1 to merge a PASSED PR into the base branch; 0 leaves it ready for a human to
 # merge. Independent of RALPH_REVIEW_GATE. Default: 0 (off)

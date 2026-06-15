@@ -24,9 +24,10 @@ borderlands the entire push → PR → review → merge cycle was operated **by 
   to a human stall (writes `STATUS.md`) instead of looping forever — the outer-loop analogue of `RALPH_MAX_STALLS`.
 - **Reviewer as a seam, not a hardcode.** GitHub Copilot review is the v1 default implementation, isolated
   behind one runner step so projects without Copilot can substitute another reviewer later.
-- **Two-level opt-in, both default OFF:** `RALPH_REVIEW_GATE` enables the review/feedback cycle;
-  `RALPH_AUTO_MERGE` separately enables auto-merging a clean+green PR. The offline inner-loop stays the
-  zero-config default; auto-merge to a base branch is never assumed.
+- **Review ON by default; auto-merge a separate opt-in:** `RALPH_REVIEW_GATE` defaults to ON — the loop is
+  GitHub-dependent, so loop mode refuses to start without a remote + `gh` + a non-base branch.
+  `RALPH_AUTO_MERGE` separately (default OFF) enables auto-merging a clean+green PR; merge is never assumed.
+  `RALPH_REVIEW_GATE=0` is the explicit offline opt-out.
 - Extend `/ralph-init` to scaffold the review-gate surface: the new `ralph.conf` keys (documented, off),
   a machine-written `review-findings.md`, a `PROMPT.md` clause giving findings priority over `tasks.md`, and
   a precondition report (remote present, `gh` authed, reviewer reachable).
@@ -57,5 +58,6 @@ borderlands the entire push → PR → review → merge cycle was operated **by 
 - **Tests:** `base/tests/` gains an outer-loop scaffold that stubs `gh` and the reviewer (no network, no real
   PR), mirroring how `test_ralph_runner.sh` stubs `claude`.
 - **This repo's specs:** new `review-gate` spec; `project-bootstrap` delta.
-- **Compatibility:** non-breaking — every new behavior is gated behind opt-in flags that default off, so
-  existing consumers and the offline test suite are unaffected.
+- **Compatibility:** review is ON by default, so a scaffolded loop now requires GitHub (remote + `gh` + a
+  non-base branch) to run — `/ralph-init` ensures this and `RALPH_REVIEW_GATE=0` is the offline opt-out. The
+  kit's own inner-loop tests opt out explicitly; the new review-gate suite stubs `gh` (no network).

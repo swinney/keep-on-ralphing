@@ -72,19 +72,22 @@ locally or should commit via `make shell`.
 
 ## Outer-loop review gate (opt-in)
 
-The local gate above is the *inner* loop. There is also an opt-in **outer loop**
-(`RALPH_REVIEW_GATE=1`, default off): after a committing turn the runner pushes the
-branch, opens/uses a PR, asks an **independent reviewer** (GitHub Copilot by default)
-to review it, and treats *zero findings + green CI* as the only PASS. Findings are
-written to `review-findings.md`, which the agent must resolve before any new task;
-persistent findings halt the loop for a human after `RALPH_REVIEW_MAX_ROUNDS`.
-`RALPH_AUTO_MERGE` (separate, default off) controls whether a clean PR auto-merges or
-is parked for you. All GitHub work is the runner's — **the container agent never
-touches `git`/`gh`** — so the gate works with any coding agent, and leaving it off
-keeps the loop fully offline. Independent review catches the "wired-wrong but green"
-class that tests, types, and lint structurally cannot (the lesson the field log
-earned the hard way). `/ralph-init` scaffolds the keys off and reports readiness; you
-turn it on once you have a remote + authenticated `gh`.
+The local gate above is the *inner* loop. There is also an **outer loop**
+(`RALPH_REVIEW_GATE`, **on by default**): after a committing turn the runner pushes
+the branch, opens/uses a PR, asks an **independent reviewer** (GitHub Copilot by
+default) to review it, and treats *zero findings + green CI* as the only PASS.
+Findings are written to `review-findings.md`, which the agent must resolve before any
+new task; persistent findings halt the loop for a human after
+`RALPH_REVIEW_MAX_ROUNDS`. `RALPH_AUTO_MERGE` (separate, default off) controls whether
+a clean PR auto-merges or is parked for you. All GitHub work is the runner's — **the
+container agent never touches `git`/`gh`** — so the gate works with any coding agent.
+Independent review catches the "wired-wrong but green" class that tests, types, and
+lint structurally cannot (the lesson the field log earned the hard way).
+
+**This makes the loop GitHub-dependent by default**: loop mode refuses to start
+without a git remote, an authenticated `gh`, and a non-base feature branch.
+`/ralph-init` ensures these during setup. If you want a purely offline loop with no
+review, set `RALPH_REVIEW_GATE=0`.
 
 ## The base image
 

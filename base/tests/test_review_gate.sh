@@ -105,7 +105,7 @@ run_gate() {
 cleanup() { [ -n "${WS:-}" ] && rm -rf "$WS"; }
 trap cleanup EXIT
 
-# --- 1. gate OFF → no gh use at all, inner loop unchanged -------------------
+# --- 1. gate explicitly OFF → no gh use at all, inner loop unchanged --------
 new_gate_ws
 cat >"$STUB/count-1.sh" <<'S'
 git commit --allow-empty -qm t1
@@ -115,7 +115,7 @@ printf 'done: stop\n' >STATUS.md
 git commit --allow-empty -qm t2
 S
 ( cd "$WS" && PATH="$STUB/bin:$PATH" HOME="$HOME_DIR" RALPH_WORKSPACE="$WS" \
-  RALPH_STATE_DIR=.ralph RALPH_POLL_INTERVAL=0 bash "$RALPH" >/dev/null 2>&1 )
+  RALPH_STATE_DIR=.ralph RALPH_POLL_INTERVAL=0 RALPH_REVIEW_GATE=0 bash "$RALPH" >/dev/null 2>&1 )
 ec=$?
 [ "$ec" -eq 0 ] && [ ! -s "$STUB/gh.log" ] \
   && ok "gate off: inner loop runs and never calls gh" \
@@ -249,6 +249,16 @@ grep -q "custom-reviewer finding" "$WS/review-findings.md" \
   && ok "alternative reviewer's findings are used" || bad "RALPH_REVIEWER findings not used"
 grep -q "add-reviewer" "$STUB/gh.log" \
   && bad "override should NOT request Copilot" || ok "override bypasses the Copilot request"
+cleanup
+
+# --- 10. gate is ON BY DEFAULT: unset RALPH_REVIEW_GATE refuses without GitHub -
+new_gate_ws
+git -C "$WS" remote remove origin
+# Note: RALPH_REVIEW_GATE is NOT set here — it must default ON and refuse.
+( cd "$WS" && PATH="$STUB/bin:$PATH" HOME="$HOME_DIR" RALPH_WORKSPACE="$WS" \
+  RALPH_STATE_DIR=.ralph RALPH_POLL_INTERVAL=0 RALPH_BASE_BRANCH=main bash "$RALPH" >/dev/null 2>&1 )
+[ $? -ne 0 ] && ok "review gate is ON by default (unset gate + no remote refuses)" \
+  || bad "default did not behave as ON (should have refused without a remote)"
 cleanup
 
 echo

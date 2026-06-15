@@ -111,18 +111,20 @@ the harness is the way it is — read the relevant one before reversing a baked-
   `current.json` (heartbeat), `status.jsonl` (one git-derived record per completed turn),
   `log/turn-<n>.txt` (line-buffered per-turn output), `turn` (counter). The
   `/ralph-status` skill reads these directly — there is no shipped status script.
-- **Outer-loop review gate (opt-in, `RALPH_REVIEW_GATE=1`, default off).** After a
-  committing turn, the *runner* (never the agent) pushes the branch, ensures a PR,
-  requests an independent review (GitHub Copilot by default; `RALPH_REVIEWER` is the
-  seam), and reads the verdict — PASS = **zero findings AND green CI** (CI read
-  directly as ground truth). Findings are written to `review-findings.md`, which the
-  PROMPT contract makes the agent's top-priority work next turn; persistent findings
-  halt after `RALPH_REVIEW_MAX_ROUNDS` (the outer-loop analogue of `RALPH_MAX_STALLS`).
+- **Outer-loop review gate (`RALPH_REVIEW_GATE`, ON by default — the loop is
+  GitHub-dependent).** After a committing turn, the *runner* (never the agent) pushes
+  the branch, ensures a PR, requests an independent review (GitHub Copilot by default;
+  `RALPH_REVIEWER` is the seam), and reads the verdict — PASS = **zero findings AND
+  green CI** (CI read directly as ground truth). Findings are written to
+  `review-findings.md`, which the PROMPT contract makes the agent's top-priority work
+  next turn; persistent findings halt after `RALPH_REVIEW_MAX_ROUNDS` (the outer-loop
+  analogue of `RALPH_MAX_STALLS`). Because it is on by default, **loop mode refuses to
+  start without a git remote + authenticated `gh` + a non-base branch** — `/ralph-init`
+  ensures these up front; `RALPH_REVIEW_GATE=0` is the explicit offline opt-out.
   `RALPH_AUTO_MERGE` (separate, default off) controls whether a PASSED PR merges or is
   parked for a human. **The load-bearing principle: the container agent stays
   GitHub-blind — all `git`/`gh` work is the runner's — so the gate is agent-agnostic
-  and the verdict wait reuses the usage-limit pause (not a stall).** Leaving the gate
-  off keeps the loop fully offline (the zero-config default).
+  and the verdict wait reuses the usage-limit pause (not a stall).**
 
 ### Invariants to preserve when editing
 

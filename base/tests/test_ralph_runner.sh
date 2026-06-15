@@ -60,10 +60,14 @@ STUBEOF
   chmod +x "$STUB/bin/claude"
 }
 
-# Run ralph.sh in the workspace with a fast, deterministic environment.
+# Run ralph.sh in the workspace with a fast, deterministic environment. The
+# review gate is ON by default but these tests exercise the INNER loop, so they
+# opt out explicitly (RALPH_REVIEW_GATE=0) — otherwise loop mode would refuse to
+# start without a git remote + gh. The review gate has its own suite.
 run_ralph() {
   ( cd "$WS" && PATH="$STUB/bin:$PATH" HOME="$HOME_DIR" \
     RALPH_WORKSPACE="$WS" RALPH_STATE_DIR=.ralph RALPH_POLL_INTERVAL=0 \
+    RALPH_REVIEW_GATE=0 \
     "$@" bash "$RALPH" ${RALPH_ARGS:-} )
 }
 

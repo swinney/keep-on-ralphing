@@ -1,22 +1,23 @@
 ## ADDED Requirements
 
-### Requirement: The review gate is opt-in and preserves the offline inner loop
+### Requirement: The review gate is ON by default and the loop is GitHub-dependent
 
-The runner SHALL treat the outer-loop review gate as opt-in via `RALPH_REVIEW_GATE`, defaulting to OFF.
-When OFF, the loop SHALL behave exactly as the inner loop does today — no push, no PR, no review, and no
-dependency on a git remote, network, or the `gh` CLI. When ON, the runner SHALL preflight its preconditions
-(a configured git remote, an authenticated `gh`, and a reachable reviewer) and refuse to start with a clear
-message if any is missing, rather than silently skipping the gate.
+The runner SHALL enable the outer-loop review gate by default (`RALPH_REVIEW_GATE` defaults to ON). Because the
+gate is on by default, loop mode SHALL preflight its preconditions (a configured git remote, an authenticated
+`gh`, a reachable reviewer, and a non-base working branch) and SHALL refuse to start with a clear message if any
+is missing, rather than silently skipping the gate — i.e. the loop is GitHub-dependent by default. Setting
+`RALPH_REVIEW_GATE=0` SHALL restore the offline inner loop: no push, no PR, no review, and no dependency on a
+git remote, network, or the `gh` CLI.
 
-#### Scenario: Gate disabled is the zero-config default
-- **WHEN** the loop runs with `RALPH_REVIEW_GATE` unset or `0`
-- **THEN** the runner completes turns using only the local gate and commit signal
-- **AND** it neither pushes nor requires `gh`, a remote, or network access
-
-#### Scenario: Gate enabled with missing preconditions fails fast
-- **WHEN** `RALPH_REVIEW_GATE=1` but no git remote is configured, `gh` is unauthenticated, or the reviewer is unreachable
+#### Scenario: Gate on by default refuses to start without GitHub
+- **WHEN** the loop runs with `RALPH_REVIEW_GATE` unset (its default) and no git remote, no authenticated `gh`, or a base-branch checkout
 - **THEN** the runner refuses to start and prints which precondition is unmet
 - **AND** it does not begin running turns
+
+#### Scenario: Explicit opt-out restores the offline loop
+- **WHEN** the loop runs with `RALPH_REVIEW_GATE=0`
+- **THEN** the runner completes turns using only the local gate and commit signal
+- **AND** it neither pushes nor requires `gh`, a remote, or network access
 
 ### Requirement: The container agent stays GitHub-blind; the runner owns all remote interaction
 

@@ -2,30 +2,31 @@
 
 ### Requirement: Scaffold the review-gate config surface
 
-`/ralph-init` SHALL scaffold the review-gate configuration surface into the target project without changing the
-zero-config offline default. It SHALL write the new `ralph.conf` keys (`RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`,
-`RALPH_REVIEW_MAX_ROUNDS`, and the base-branch setting) documented and defaulting to OFF/safe values, ensure a
-`review-findings.md` sink exists (gitignored or empty), and include in the rendered `PROMPT.md` the clause that
-requires the agent to resolve outstanding `review-findings.md` entries before any `tasks.md` task. Existing files
-SHALL NOT be overwritten, consistent with the bootstrap no-overwrite rule.
+`/ralph-init` SHALL scaffold the review-gate configuration surface into the target project. It SHALL write the
+`ralph.conf` keys (`RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`, `RALPH_REVIEW_MAX_ROUNDS`, and the base-branch
+setting) documented, with `RALPH_REVIEW_GATE` defaulting to ON (the loop is GitHub-dependent) and
+`RALPH_AUTO_MERGE` defaulting to OFF, ensure a `review-findings.md` sink is gitignored, and include in the
+rendered `PROMPT.md` the clause that requires the agent to resolve outstanding `review-findings.md` entries
+before any `tasks.md` task. Existing files SHALL NOT be overwritten, consistent with the bootstrap no-overwrite
+rule.
 
-#### Scenario: Review-gate keys are scaffolded off by default
+#### Scenario: Review-gate keys are scaffolded on by default
 - **WHEN** `/ralph-init` scaffolds a project
-- **THEN** `ralph.conf` contains the review-gate keys, documented, with `RALPH_REVIEW_GATE` and `RALPH_AUTO_MERGE` defaulting to off
-- **AND** the project's loop runs the offline inner loop unchanged until a user opts in
+- **THEN** `ralph.conf` contains the review-gate keys, documented, with `RALPH_REVIEW_GATE` on and `RALPH_AUTO_MERGE` off
+- **AND** the user can restore an offline loop by setting `RALPH_REVIEW_GATE=0`
 
 #### Scenario: PROMPT.md gains the finding-priority clause
 - **WHEN** `/ralph-init` renders `PROMPT.md` from the template
 - **THEN** the prompt instructs the agent to resolve outstanding `review-findings.md` entries before selecting the next `tasks.md` task
 
-### Requirement: Report review-gate readiness during scaffolding
+### Requirement: Ensure GitHub readiness during scaffolding
 
-When the review gate is requested or detected as desired, `/ralph-init` SHALL report whether the review-gate
-preconditions are satisfiable — a configured git remote, an authenticated `gh`, and an available default reviewer
-— marking each as present or missing, so the user knows the gate cannot run until they are met. It SHALL NOT
-enable the gate on the user's behalf without their confirmation.
+Because the review gate is ON by default and loop mode refuses to start without GitHub, `/ralph-init` SHALL
+check the preconditions during init — a configured git remote, an authenticated `gh`, and a non-base feature
+branch — mark each as ready or blocked, and give the user the exact fix for any that are blocked, so they do
+not discover the refusal at first run. It SHALL note that the explicit offline opt-out is `RALPH_REVIEW_GATE=0`.
 
-#### Scenario: Precondition report is surfaced
+#### Scenario: GitHub readiness is ensured and reported
 - **WHEN** `/ralph-init` scaffolds the review-gate surface
-- **THEN** it reports the status of the git remote, `gh` authentication, and the default reviewer
-- **AND** it tells the user the gate stays off until they set `RALPH_REVIEW_GATE=1` with preconditions met
+- **THEN** it reports the status of the git remote, `gh` authentication, and the working branch
+- **AND** for any blocked precondition it gives the user the exact remediation, noting that `RALPH_REVIEW_GATE=0` is the offline opt-out

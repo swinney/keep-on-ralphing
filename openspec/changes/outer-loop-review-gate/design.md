@@ -59,12 +59,14 @@ status from the CI system itself, never trusting a reviewer's claim about CI —
 review state" and "no high-severity findings" both assume reviewer capabilities an arbitrary reviewer won't
 reliably provide.
 
-### D5 — Two independent opt-in switches, both default off
-`RALPH_REVIEW_GATE` turns on the review/feedback cycle; `RALPH_AUTO_MERGE` separately turns on merging a
-PASSED PR. Getting the review and feeding findings back is high-value and low-risk; auto-merging into a
-stranger's base branch is not a safe default (branch protection, release branches). Splitting them lets a
-project adopt the review value without surrendering merge control. Config precedence follows the existing
-`environment > ralph.conf > default` rule (snapshot-and-reapply), so the new keys need no special handling.
+### D5 — Review ON by default; auto-merge a separate, default-off switch
+`RALPH_REVIEW_GATE` defaults to ON: independent review is the highest-value gate (the field log's finding), so
+the loop is GitHub-dependent by default and refuses to start without a remote + `gh` + a non-base branch
+(`/ralph-init` ensures these; `RALPH_REVIEW_GATE=0` is the offline opt-out). `RALPH_AUTO_MERGE` is separate and
+defaults OFF: getting the review and feeding findings back is high-value and low-risk, but auto-merging into a
+base branch is not a safe default (branch protection, release branches), so merge control stays explicit.
+Config precedence follows the existing `environment > ralph.conf > default` rule (snapshot-and-reapply), so the
+new keys need no special handling.
 
 ### D6 — Reviewer behind one isolated step; Copilot is the default
 "Request review of PR → return findings" is a single shell function with a defined contract (in: PR ref; out:

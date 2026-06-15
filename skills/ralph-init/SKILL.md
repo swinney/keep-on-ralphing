@@ -65,10 +65,11 @@ file or directory that already exists** — leave it intact and record it as
 
 - **`ralph.conf`** — from `ralph.conf.example`, with the inferred values
   (RALPH_CONTAINER=<image>, RALPH_RUNTIME=podman, paths, etc.). This includes the
-  **opt-in review-gate keys** (`RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`,
-  `RALPH_REVIEW_MAX_ROUNDS`, `RALPH_BASE_BRANCH`, `RALPH_REVIEWER`) — leave them at
-  their default OFF/empty values. Do NOT enable the gate; that is the user's call
-  (see §3d and the precondition report in §4).
+  **review-gate keys** (`RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`,
+  `RALPH_REVIEW_MAX_ROUNDS`, `RALPH_BASE_BRANCH`, `RALPH_REVIEWER`). The loop is
+  **GitHub-dependent by default**: keep `RALPH_REVIEW_GATE=1` and ensure GitHub is
+  ready (§3d). Set it to `0` only if the user explicitly asks for an offline loop
+  with no review. (`RALPH_AUTO_MERGE` stays `0` — merging is still the user's call.)
 - **`PROMPT.md`** — from `PROMPT.md.template`, filling `{{PROJECT_NAME}}`,
   `{{SPECS_DIR}}`, `{{TESTS_DIR}}`, `{{DECISIONS_DIR}}`. The gate command is NOT a
   PROMPT placeholder — it lives only in `scripts/gate.sh` (below); the prompt just
@@ -115,17 +116,29 @@ file or directory that already exists** — leave it intact and record it as
   otherwise leave the dir with just the guide and let the loop's normal
   spec→test→implement workflow take over.
 
-### 3d. Review gate (opt-in — scaffold OFF, never enable)
+### 3d. Review gate (ON by default — ensure GitHub during init)
 
-The loop has an optional **outer-loop review gate**: when enabled, the runner
-(never the agent) pushes the branch, opens/uses a PR, requests an independent
-review (GitHub Copilot by default), and treats *zero findings + green CI* as the
-only PASS — writing any findings to `review-findings.md` for the agent to resolve
-next turn. The container agent stays GitHub-blind, so this works with any coding
-agent. Scaffold the keys (above) but **leave the gate OFF**: it requires a git
-remote, an authenticated `gh`, and running on a non-base feature branch — the
-offline inner loop stays the zero-config default. Enabling it is the user's
-decision; you only report readiness (§4).
+The loop's **outer-loop review gate is ON by default**: after a turn commits, the
+runner (never the agent) pushes the branch, opens/uses a PR, requests an
+independent review (GitHub Copilot by default), and treats *zero findings + green
+CI* as the only PASS — writing any findings to `review-findings.md` for the agent
+to resolve next turn. The container agent stays GitHub-blind, so this works with
+any coding agent.
+
+Because it is on by default, **this loop is GitHub-dependent**: loop mode refuses
+to start without a git remote, an authenticated `gh`, and a non-base feature
+branch. So **ensure those during init** — do not leave the user to discover the
+refusal at first run:
+
+- Check `git remote` — if none, help the user add one (`git remote add origin
+  <url>`); a GitHub remote is required.
+- Check `gh auth status` — if unauthenticated, tell the user to run `gh auth
+  login` (an interactive step they run on the host).
+- Confirm the loop will run on a non-base feature branch (not directly on the
+  default branch).
+- Report each as ready/blocked (§4). If a precondition cannot be met now, tell the
+  user the loop will not start until it is — or, only if they explicitly want an
+  offline loop with no review, set `RALPH_REVIEW_GATE=0` in `ralph.conf`.
 
 Then ensure the runtime state is gitignored — append `.ralph/` and
 `/review-findings.md` to the repo's `.gitignore` (create it if missing).
@@ -146,12 +159,13 @@ must not be committed.
   `.git/config` is shared. Tell the user that host-side committers need the gate's
   toolchain installed locally (or should commit via `make shell`); the gate is
   designed to run where the toolchain lives (the container).
-- Print a **review-gate readiness** report (the gate is scaffolded OFF). Check and
-  mark each precondition present/missing: a git remote (`git remote`), an
-  authenticated `gh` (`gh auth status`), and the default reviewer (GitHub Copilot
-  review available on the repo). Tell the user the gate stays off until they set
-  `RALPH_REVIEW_GATE=1` in `ralph.conf` with those met and run the loop on a
-  non-base feature branch. Do NOT enable it for them.
+- Print a **GitHub readiness** report — the review gate is ON by default, so the
+  loop will REFUSE to start until these are met. Check and mark each
+  present/blocked: a git remote (`git remote`), an authenticated `gh` (`gh auth
+  status`), and a non-base feature branch. For any that are blocked, give the
+  user the exact fix (`git remote add origin <url>`, `gh auth login`, check out a
+  feature branch). If they instead want an offline loop with no review, the
+  opt-out is `RALPH_REVIEW_GATE=0` in `ralph.conf`.
 - Tell the user the next steps explicitly:
   1. In a clone of `keep-on-ralphing`: `make build-base` (builds `ralph-base:v1`).
   2. In this project: `make build` (also installs the gate hook), then `make login`
@@ -173,6 +187,8 @@ must not be committed.
 - The CI workflow's `{{TOOLCHAIN_INSTALL}}` is best-effort — CI runner setup can't
   be fully inferred. Always flag it for the user to confirm against the Containerfile.
 - Never overwrite existing files/dirs; preserve and report them as skipped.
-- Never enable the review gate on the user's behalf — scaffold the keys OFF and
-  only report readiness. Turning on `RALPH_REVIEW_GATE`/`RALPH_AUTO_MERGE` (which
-  add a remote/`gh`/push dependency and can auto-merge) is always the user's call.
+- The review gate is ON by default (the loop is GitHub-dependent): ensure the
+  GitHub preconditions during init rather than letting the user hit the runtime
+  refusal. Only set `RALPH_REVIEW_GATE=0` if the user explicitly asks for an
+  offline loop. `RALPH_AUTO_MERGE` stays OFF unless the user opts in — auto-merging
+  is a separate, explicit choice.

@@ -94,6 +94,38 @@ side (and usually a test); a change to *how this repo is built/verified* edits t
 the harness is the way it is — read the relevant one before reversing a baked-in choice
 (image base, runtime portability, gate model).
 
+## Releasing — two channels, unlinked versions
+
+A release ships through **two independent channels that have no shared version**, and
+nothing forces them to move together. Skipping either half ships a silent partial release:
+
+- **Plugin** (`skills/` + `templates/`) — versioned by `.claude-plugin/plugin.json`. The
+  Claude Code marketplace updater keys off this string. **Pushing commits without bumping
+  the version makes `/plugin update` a no-op** — the new skill/templates never reach
+  installs. The Skill tool also loads the *cached* plugin
+  (`~/.claude/plugins/cache/.../<version>/`), **not** the working tree, so a skill change
+  is invisible locally until the cache is refreshed.
+- **Base image** (`base/`) — versioned by its tag (`ralph-base:v1`). Distributed by local
+  `make build-base`, **not** the marketplace; a plugin update can't trigger it. Runner
+  (`base/scripts/`) changes reach a machine only after a rebuild there.
+
+**Checklist for any change that alters harness behaviour:**
+
+1. `make test` green (faithful CI predictor — see Commands).
+2. If `skills/` or `templates/` changed → **bump `.claude-plugin/plugin.json` version**
+   (semver; this is what makes the plugin installable). Verify it's not still the old value.
+3. Commit + push `main`.
+4. If `base/scripts/` (the runner) or `base/Containerfile` changed → tell the user to
+   `make build-base` on every machine that runs the loop; bump the image tag if the change
+   is breaking for existing consumers.
+5. To apply on a machine: `/plugin marketplace update keep-on-ralphing` →
+   `/plugin update ralph-harness@keep-on-ralphing`; confirm a `.../<new-version>/` dir
+   appears in the cache.
+
+A behaviour change usually touches BOTH channels (e.g. the review gate = runner logic in
+`base/scripts/ralph.sh` *and* config keys in `templates/`), so steps 2 and 4 are commonly
+both required in one release.
+
 ## How the loop works (base/scripts/ralph.sh)
 
 - **One turn = one `claude -p --dangerously-skip-permissions <PROMPT.md`**, wrapped in

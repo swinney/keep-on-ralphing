@@ -17,6 +17,17 @@
 #   RALPH_LIMIT_POLL    fallback wait on an unparseable limit (default: 900 = 15 min)
 #   RALPH_POLL_INTERVAL inter-turn sleep in loop mode, seconds (default: 30)
 #
+# Outer-loop review gate. RALPH_REVIEW_GATE is ON by default — independent review
+# is the highest-value gate — so loop mode needs a git remote + an authenticated
+# gh + a non-base working branch, and REFUSES to start without them. Set
+# RALPH_REVIEW_GATE=0 to run the offline inner loop only.
+#   RALPH_REVIEW_GATE      1 to push -> PR -> independent review after a commit  (default: 1, ON)
+#   RALPH_AUTO_MERGE       1 to merge a PASSED PR; else park it for a human      (default: 0)
+#   RALPH_REVIEW_MAX_ROUNDS consecutive finding-producing rounds before halt     (default: 3)
+#   RALPH_BASE_BRANCH      PR base branch; empty = origin's default branch       (default: auto)
+#   RALPH_REVIEWER         reviewer command (run as: <cmd> <pr-number>, prints
+#                          findings, empty = clean); empty = GitHub Copilot      (default: Copilot)
+#
 # Usage:
 #   ralph.sh            loop until STATUS.md gets a stop reason, SIGINT, or stall
 #   ralph.sh --once     run exactly ONE logged turn, then exit with its code
@@ -156,6 +167,132 @@ else:
 PY
 }
 
+# --- outer-loop review gate (ON by default; set RALPH_REVIEW_GATE=0 to disable) 
+# ALL GitHub interaction lives here, in the runner — the coding agent never
+# touches git remotes, gh, or PRs, so the gate works no matter which agent runs
+# in the container. Review findings re-enter the agent's world only as text in
+# review-findings.md, which the scaffolded PROMPT.md tells it to resolve before
+# any tasks.md task. The verdict (zero findings AND green CI) is the only PASS.
+review_findings="review-findings.md"
+REVIEW_GATE_HALT=0
+
+working_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null; }
+
+base_branch() {
+  if [ -n "${RALPH_BASE_BRANCH:-}" ]; then
+    printf '%s\n' "$RALPH_BASE_BRANCH"
+    return
+  fi
+  # origin's default branch (refs/remotes/origin/HEAD -> origin/<name>); main if unknown.
+  local d
+  d=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's#^refs/remotes/origin/##')
+  printf '%s\n' "${d:-main}"
+}
+
+# Ensure a PR exists for the current branch; echo its number. Reuses an open one.
+ensure_pr() {
+  local num
+  num=$(gh pr view --json number --jq .number 2>/dev/null)
+  if [ -z "$num" ]; then
+    gh pr create --base "$(base_branch)" --head "$(working_branch)" --fill \
+      --title "ralph: $(working_branch)" \
+      --body "Automated Ralph loop branch. Review input is the diff + repo state only." \
+      >/dev/null 2>&1
+    num=$(gh pr view --json number --jq .number 2>/dev/null)
+  fi
+  printf '%s\n' "$num"
+}
+
+# Request an independent review of PR <num>; print findings, one per line (empty
+# == clean). Default reviewer is GitHub Copilot via gh; RALPH_REVIEWER=<cmd>
+# overrides it (the substitution seam). The author's INTENT is withheld — only
+# the PR diff/state is given to the reviewer.
+request_review() {
+  local num="$1"
+  if [ -n "${RALPH_REVIEWER:-}" ]; then
+    "$RALPH_REVIEWER" "$num"
+    return
+  fi
+  # v1 default: request a Copilot review, then read its comments as findings.
+  # (Exact Copilot request API is pinned at implementation — see design Open Qs.)
+  gh pr edit "$num" --add-reviewer "@copilot" >/dev/null 2>&1 || true
+  gh pr view "$num" --json comments --jq '.comments[].body' 2>/dev/null |
+    grep -v '^[[:space:]]*$' || true
+}
+
+# CI verdict for PR <num>: echo success|pending|failure. Read DIRECTLY from CI
+# (ground truth), never from a reviewer's claim. `gh pr checks` exits 0=all pass,
+# 8=pending, other=failing.
+ci_status() {
+  gh pr checks "$1" >/dev/null 2>&1
+  case $? in
+    0) echo success ;;
+    8) echo pending ;;
+    *) echo failure ;;
+  esac
+}
+
+merge_pr() { gh pr merge "$1" --merge >/dev/null 2>&1; }
+
+# Run the gate for the just-committed turn. Returns 0 to continue the loop; sets
+# REVIEW_GATE_HALT=1 (after writing STATUS.md) when the bounded rounds are spent.
+# Not a stall: a committing turn already reset the stall counter, and the verdict
+# wait below never reaches the stall check.
+run_review_gate() {
+  REVIEW_GATE_HALT=0
+  local num status waited findings
+  git push -u origin "$(working_branch)" >/dev/null 2>&1 || true
+  num=$(ensure_pr)
+  if [ -z "$num" ]; then
+    echo "ralph: review-gate could not resolve a PR for $(working_branch) — skipping this turn"
+    return 0
+  fi
+
+  # Wait for CI to settle (pending is not a verdict), bounded so a wedged run
+  # cannot hang the loop forever. Reuses the limit_poll cadence.
+  waited=0
+  status=$(ci_status "$num")
+  while [ "$status" = pending ] && [ "$waited" -lt "${RALPH_REVIEW_CI_MAX:-60}" ]; do
+    sleep "$limit_poll"
+    waited=$((waited + 1))
+    status=$(ci_status "$num")
+  done
+
+  findings=$(request_review "$num")
+
+  if [ -z "${findings//[[:space:]]/}" ] && [ "$status" = success ]; then
+    : >"$review_findings"
+    review_rounds=0
+    echo "ralph: review-gate PASS on PR #$num (clean review, CI green)"
+    if [ "${RALPH_AUTO_MERGE:-0}" = 1 ]; then
+      merge_pr "$num" && echo "ralph: auto-merged PR #$num into $(base_branch)"
+    else
+      echo "ralph: PR #$num is ready for a human to merge (RALPH_AUTO_MERGE off)"
+    fi
+    return 0
+  fi
+
+  # NOT PASS: record findings so the next turn fixes them. A red/pending CI is
+  # surfaced as a synthetic finding so the agent always has something to act on.
+  {
+    echo "# Review findings for PR #$num — resolve these before any tasks.md task."
+    echo
+    [ "$status" != success ] && echo "- CI is not green (status: $status). Make the gate match CI and fix the failure."
+    if [ -n "${findings//[[:space:]]/}" ]; then
+      printf '%s\n' "$findings" | grep -v '^[[:space:]]*$' | sed 's/^/- /'
+    fi
+  } >"$review_findings"
+  review_rounds=$((review_rounds + 1))
+  echo "ralph: review-gate found issues on PR #$num (round ${review_rounds}/${RALPH_REVIEW_MAX_ROUNDS:-3}) — wrote $review_findings"
+
+  if [ "$review_rounds" -ge "${RALPH_REVIEW_MAX_ROUNDS:-3}" ]; then
+    printf 'Loop halted: review gate still failing after %d rounds on PR #%s. Human review needed.\n' \
+      "$review_rounds" "$num" >STATUS.md
+    REVIEW_GATE_HALT=1
+  fi
+  return 0
+}
+
 turn_ec=0
 run_turn() {
   turn=$((turn + 1))
@@ -216,6 +353,27 @@ fi
 
 echo "ralph: starting at turn $turn ($(date -Is)) — timeout ${turn_timeout}s, max-stalls ${max_stalls}"
 
+# Outer-loop review gate preflight (opt-in). All remote work is the runner's, so
+# fail fast if its preconditions are unmet rather than silently skipping the gate.
+review_rounds=0
+if [ "${RALPH_REVIEW_GATE:-1}" = 1 ]; then
+  command -v gh >/dev/null 2>&1 ||
+    { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not on PATH — refusing to start" >&2; exit 1; }
+  gh auth status >/dev/null 2>&1 ||
+    { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not authenticated — refusing to start" >&2; exit 1; }
+  git remote | grep -q . ||
+    { echo "ralph: RALPH_REVIEW_GATE=1 but no git remote is configured — refusing to start" >&2; exit 1; }
+  if [ "$(working_branch)" = "$(base_branch)" ]; then
+    echo "ralph: RALPH_REVIEW_GATE=1 but the working branch equals the base branch ($(base_branch)) — check out a feature branch first" >&2
+    exit 1
+  fi
+  if [ -n "${RALPH_REVIEWER:-}" ] && ! command -v "$RALPH_REVIEWER" >/dev/null 2>&1 && [ ! -x "$RALPH_REVIEWER" ]; then
+    echo "ralph: RALPH_REVIEWER='$RALPH_REVIEWER' is not executable — refusing to start" >&2
+    exit 1
+  fi
+  echo "ralph: review gate ON — branch $(working_branch) -> base $(base_branch); auto-merge ${RALPH_AUTO_MERGE:-0}; max-rounds ${RALPH_REVIEW_MAX_ROUNDS:-3}"
+fi
+
 # STATUS.md is BOTH the loop's stop-signal and the human cold-start breadcrumb,
 # so it is normally non-empty when a loop starts. Snapshot it now and treat only
 # a CHANGE to non-whitespace content as a stop reason — a pre-existing breadcrumb
@@ -255,6 +413,19 @@ while true; do
     echo "--- STATUS.md ---"
     cat STATUS.md
     exit 0
+  fi
+
+  # Outer-loop review gate: only when enabled AND this turn committed (there is
+  # something new to review). A committing turn is not a stall, and the gate's
+  # verdict wait never reaches the stall check below.
+  if [ "${RALPH_REVIEW_GATE:-1}" = 1 ] && [ "$before" != "$after" ]; then
+    run_review_gate
+    if [ "$REVIEW_GATE_HALT" = 1 ]; then
+      echo "ralph: review gate exhausted its rounds at turn $turn — wrote STATUS.md, stopping"
+      echo "--- STATUS.md ---"
+      cat STATUS.md
+      exit 1
+    fi
   fi
 
   if [ "$before" = "$after" ]; then

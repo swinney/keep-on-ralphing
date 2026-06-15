@@ -1,0 +1,26 @@
+# .github/workflows/ci.yml — run the SAME gate the loop enforces locally.
+#
+# The gate COMMAND is single-source (scripts/gate.sh); only the environment SETUP
+# differs between the loop container and a GitHub runner, which is unavoidable.
+
+name: gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- toolchain : matches the Acme Widgets Containerfile (ruff, mypy, pytest+cov) -
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ruff mypy pytest pytest-cov
+      # --- end toolchain ----------------------------------------------------------
+
+      - name: gate
+        run: bash scripts/gate.sh

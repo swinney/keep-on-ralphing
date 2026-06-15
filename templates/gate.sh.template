@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# scripts/gate.sh — the project's quality gate, in CI order. SINGLE SOURCE.
+#
+# This is project-OWNED config, not harness machinery: it encodes THIS project's
+# formatter / linter / type-checker / test runner. PROMPT.md, the pre-commit hook
+# (hooks/pre-commit), and CI (.github/workflows/ci.yml) all invoke this one file —
+# the gate command must never be duplicated, or the three will drift.
+#
+# Contract: run every check in the SAME order CI runs them; exit 0 only if all
+# pass; exit non-zero on the first failure. `set -e` enforces that with `&&`-free
+# sequencing — each command must succeed for the next to run.
+#
+# PLACEHOLDERS (the closed set):
+#   {{GATE_COMMAND}}  the full gate, in CI order, as one line. It MUST include a
+#                     test-COVERAGE check with a threshold, not just a test run
+#                     (e.g. `ruff format . && ruff check . && mypy . &&
+#                      pytest --cov=<pkg> --cov-fail-under=80`).
+#
+# Run a FORMATTER, not just a format-CHECK: a passing-tests commit still fails CI
+# if it is unformatted.
+#
+# Gate COVERAGE, not just test pass/fail: "tests pass" is not "the code is tested."
+# The default is a GLOBAL coverage floor (project-wide % must meet the threshold),
+# which is portable across tools and fits a project grown test-first. For a
+# brownfield repo where one legacy untested module would tank the global number,
+# switch to PATCH/diff coverage (gate only the lines this change touched, e.g.
+# `diff-cover`). Coverage is a SUPPORTING gate — it catches lazy/trivial tests, but
+# not tests that fake the precondition that matters; the independent-review gate
+# catches that class.
+
+set -euo pipefail
+
+{{GATE_COMMAND}}

@@ -27,12 +27,18 @@ the repo root, then read:
 4. **Stop signal** — `STATUS.md`. Treat it as a stop reason **only if it has
    non-whitespace content** (mirror the runner's rule — a blank/whitespace-only
    file is NOT a stop). Show the reason if stopped.
-5. **Recent commits** — `git log --oneline -6`.
+5. **Review gate (only if `RALPH_REVIEW_GATE=1` in `ralph.conf`)** — report it is
+   active, and surface any open review feedback: if `review-findings.md` exists and
+   is non-empty, the last review found issues the next turn must resolve, so show a
+   short summary (the PR number from its header + the finding count). If it is
+   absent/empty, the last review was clean. If the gate is off, omit this section.
+6. **Recent commits** — `git log --oneline -6`.
 
 ## How to report
 
 Print a compact digest, in this order: running state → current turn → recent
-turns (newest last) → STATUS.md stop state → recent commits. Keep it scannable
+turns (newest last) → STATUS.md stop state → review-gate state (if on) → recent
+commits. Keep it scannable
 (a few lines each). Don't editorialize; report the facts. If the state dir
 doesn't exist yet, say the loop has not run in this repo.
 

@@ -64,3 +64,7 @@ what invoking this skill does. Never hand the user a frozen cache path to reuse.
   valid for contributors and CI; this skill is the clone-free path for plugin users.
 - Do not run a project's `make loop` from this skill — building the image is its
   only job.
+- If you ever present the user with a choice (e.g. a non-default runtime), follow the
+  Ralph recommended-option convention: mark one option "(recommended)" first with a
+  one-line, repo-specific reason; state the risk and require confirmation for any
+  high-stakes choice.

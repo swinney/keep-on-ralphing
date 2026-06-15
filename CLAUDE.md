@@ -75,6 +75,11 @@ like a spec, so a fake one is worse than none.
 reference for what `/ralph-init` should produce. `extras/` is explicitly **unsupported**
 (experimental fan-out scripts) — not wired into the image, plugin, or tests.
 
+**Skill interaction convention:** whenever a skill presents the operator a choice, it marks
+one option "(recommended)" first with a one-line, repo-specific reason; high-stakes choices
+(gate command, coverage threshold/mode, auto-merge) state the risk and still require
+confirmation. This is presentation only — it never changes the actual defaults.
+
 ## This repo dogfoods what it ships — mind the namespace collision
 
 The kit *generates* specs, a gate, CI, and decision records for consumers; this repo

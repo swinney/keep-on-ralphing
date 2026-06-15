@@ -60,7 +60,11 @@ Gather these, reading the repo; state each as "inferred X" or ask if unsure:
   test-COVERAGE check with a threshold, not just a test run. This MUST match what CI
   runs, in CI order. **Confirm the gate, the coverage threshold, AND the coverage
   MODE with the user** — a wrong/too-aggressive value, or the wrong mode, blocks
-  every commit. The coverage-MODE choice you present MUST always include patch/scoped
+  every commit. Present each as a recommended option with a repo-specific reason (per
+  the Guardrails convention); these are high-stakes, so the rationale states the risk
+  and you require confirmation rather than silently applying it. For the threshold,
+  recommend a starting value that fits the repo (e.g. higher for a scoped pure-logic
+  gate than for a global floor). The coverage-MODE choice you present MUST always include patch/scoped
   coverage (gating only the lines/paths a turn changed) as a first-class option — not
   only "global floor vs none". Order the recommended option by the assessment:
     - **Greenfield → recommend a GLOBAL floor**, e.g.
@@ -212,6 +216,18 @@ must not be committed.
   from the freshly-installed bundled `base/`.
 
 ## Guardrails
+- **Every choice you present gets a recommended option with a repo-specific reason.**
+  When you ask the user to choose (coverage mode/threshold, the gate command,
+  task/spec wiring, GitHub/offline, …), mark exactly ONE option "(recommended)",
+  present it first, and give a one-line rationale tied to THIS repo — not a static
+  default (e.g. "recommended for this repo — a global floor would fail the first
+  commit on the untested scaffold"). The reason is what lets a non-expert choose
+  well; "(recommended)" alone just moves the cursor. Two carve-outs: (1) **recommend
+  ≠ pre-decide** — for high-stakes/irreversible choices (gate command, coverage
+  threshold/mode, auto-merge, review-gate changes) state the *risk* in the rationale
+  and still require explicit confirmation, never silent-accept; (2) where there is no
+  safe default, say so plainly rather than fabricate a recommendation. This governs
+  presentation only — it changes nothing about the actual defaults below.
 - Never write the loop *machinery* (`ralph.sh`, `until_reset.py`) into the target
   repo — it comes from the image. `scripts/gate.sh` is the one exception that is
   NOT machinery: it is project-OWNED config (this project's own gate command),

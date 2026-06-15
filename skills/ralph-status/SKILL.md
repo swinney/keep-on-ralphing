@@ -46,3 +46,6 @@ doesn't exist yet, say the loop has not run in this repo.
 - Read-only. Never start, stop, or modify the loop or its state.
 - A blank or whitespace-only `STATUS.md` is NOT a stop signal — never report it
   as one.
+- If you ever present the user with a choice, follow the Ralph recommended-option
+  convention: mark one option "(recommended)" first with a one-line, repo-specific
+  reason; state the risk and require confirmation for any high-stakes choice.

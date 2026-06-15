@@ -198,13 +198,18 @@ BODY
   pr_num=$(echo "$pr_url_out" | grep -oE '[0-9]+$' || true)
 
   if [ -n "$pr_num" ]; then
-    # Request Copilot review via gh cli (preferred over raw API). Non-fatal:
-    # the PR exists either way, so a reviewer-request hiccup must not stall.
+    # Request a Copilot review via the REST API. `gh pr edit --add-reviewer
+    # copilot` does NOT work: the Copilot reviewer is a bot, and gh's GraphQL
+    # requestReviewsByLogin path cannot resolve the login `copilot` ("Could not
+    # resolve user with login 'copilot'"). The requested_reviewers REST endpoint
+    # accepts the bot under the login `Copilot`. Non-fatal: the PR exists either
+    # way, so a reviewer-request hiccup must not stall.
     # NOTE: fanout-land.sh only auto-merges when there are zero Copilot inline
-    # comments — which presumes a review was actually produced. If this request
-    # silently no-ops (env-dependent reviewer slug), no review is generated, so
-    # confirm Copilot reviewed before relying on `make fanout-land` to merge.
-    gh pr edit "$pr_num" --add-reviewer copilot 2>/dev/null || \
+    # comments — which presumes a review was actually produced. Confirm Copilot
+    # reviewed (it posts as `copilot-pull-request-reviewer[bot]`) before relying
+    # on `make fanout-land` to merge.
+    gh api -X POST "repos/{owner}/{repo}/pulls/${pr_num}/requested_reviewers" \
+      -f "reviewers[]=Copilot" >/dev/null 2>&1 || \
       echo "fanout: tribe ${tribe}: note — could not add Copilot reviewer (non-fatal)"
     echo "fanout: tribe ${tribe}: PR #${pr_num} opened — slot freed"
   else

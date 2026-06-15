@@ -1,0 +1,27 @@
+# CI for keep-on-ralphing itself — runs the kit test suite (`make test`) on the
+# stack the harness actually uses: bash + git + timeout (present on the runner)
+# plus Python 3.12 (matching base/Containerfile's python:3.12-slim) and pytest.
+#
+# The suite is self-contained — it stubs the `claude` binary and uses git
+# fixtures — so CI does NOT build the podman base image; it just runs the tests.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install pytest
+
+      - name: kit test suite
+        run: make test

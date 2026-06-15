@@ -23,5 +23,13 @@ echo "== ralph.sh runner tests =="
 bash "$here/test_ralph_runner.sh" || rc=1
 
 echo
+echo "== gate hook tests =="
+bash "$here/test_gate_hook.sh" || rc=1
+
+echo
+echo "== review gate tests =="
+bash "$here/test_review_gate.sh" || rc=1
+
+echo
 [ "$rc" -eq 0 ] && echo "ALL KIT TESTS PASSED" || echo "KIT TESTS FAILED"
 exit "$rc"

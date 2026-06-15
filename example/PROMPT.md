@@ -7,6 +7,13 @@ nothing else. Do not do work that is not that task: no memory management, no
 unrequested refactors, no documentation side-quests, no reorganizing. If the
 task is small, finish it and stop; do not look for extra things to do.
 
+**Review findings come first.** If /review-findings.md exists and is non-empty,
+an independent review flagged problems with already-committed work — resolving
+those findings (then committing) IS your one task this invocation, ahead of any
+/tasks.md task. Fix the implementation to satisfy the review; do not edit specs
+or tests to silence a finding. Do not pick a /tasks.md task while
+/review-findings.md still has open items.
+
 ## Workflow
 1. Read /docs/specs/ to understand the architecture
 2. Read /tasks.md and pick the first unchecked task
@@ -16,12 +23,15 @@ task is small, finish it and stop; do not look for extra things to do.
    /tests/<system>/ derived from the spec. Stop. Commit. Exit.
 5. If tests exist but fail or are missing implementation, implement
    until all tests pass. Then commit. Exit.
-6. Before any commit, run the FULL gate in CI order and fix any failure
-   before committing (do not commit red):
-   `ruff format . && ruff check . && mypy . && pytest`
-   Run the gate exactly as CI does — if CI checks formatting, you must
-   actually FORMAT (not just check): a correct, passing-tests commit still
-   fails CI if it is unformatted.
+6. Before any commit, run the FULL gate and fix any failure before
+   committing (do not commit red):
+   `./scripts/gate.sh`
+   This is the single source of the gate (the same script CI and the
+   pre-commit hook run), executing format → lint → type-check → test in CI
+   order. If it checks formatting, you must actually FORMAT (not just check):
+   a correct, passing-tests commit still fails CI if it is unformatted. The
+   pre-commit hook runs this script and BLOCKS the commit if it fails —
+   never bypass it with `git commit --no-verify`.
 7. Mark the task complete in /tasks.md if and only if the full
    spec→test→implementation cycle for it is done and green.
 

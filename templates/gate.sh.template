@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# scripts/gate.sh — the project's quality gate, in CI order. SINGLE SOURCE.
+#
+# This is project-OWNED config, not harness machinery: it encodes THIS project's
+# formatter / linter / type-checker / test runner. PROMPT.md, the pre-commit hook
+# (hooks/pre-commit), and CI (.github/workflows/ci.yml) all invoke this one file —
+# the gate command must never be duplicated, or the three will drift.
+#
+# Contract: run every check in the SAME order CI runs them; exit 0 only if all
+# pass; exit non-zero on the first failure. `set -e` enforces that with `&&`-free
+# sequencing — each command must succeed for the next to run.
+#
+# PLACEHOLDERS (the closed set):
+#   {{GATE_COMMAND}}  the full gate, in CI order, as one line
+#                     (e.g. `ruff format . && ruff check . && mypy . && pytest`)
+#
+# Run a FORMATTER, not just a format-CHECK: a passing-tests commit still fails CI
+# if it is unformatted.
+
+set -euo pipefail
+
+{{GATE_COMMAND}}

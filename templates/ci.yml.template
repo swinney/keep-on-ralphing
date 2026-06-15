@@ -1,0 +1,34 @@
+# .github/workflows/ci.yml — run the SAME gate the loop enforces locally.
+#
+# The gate COMMAND is single-source (scripts/gate.sh); only the environment SETUP
+# differs between the loop container and a GitHub runner, which is unavoidable.
+#
+# PLACEHOLDERS (the closed set):
+#   {{TOOLCHAIN_INSTALL}}  best-effort setup of the tools scripts/gate.sh invokes,
+#                          as GitHub Actions steps. CONFIRM this matches your
+#                          Containerfile toolchain — it is the one part CI cannot
+#                          fully infer.
+
+name: gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- {{TOOLCHAIN_INSTALL}} : PROJECT-SPECIFIC — replace this block ---------
+      # Set up the exact tools scripts/gate.sh runs (formatter, linter, types, tests).
+      # Example (Python):
+      #   - uses: actions/setup-python@v5
+      #     with: { python-version: '3.12' }
+      #   - run: pip install ruff mypy pytest
+      {{TOOLCHAIN_INSTALL}}
+      # --- end project-specific block --------------------------------------------
+
+      - name: gate
+        run: bash scripts/gate.sh

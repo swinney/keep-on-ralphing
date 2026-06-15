@@ -148,7 +148,11 @@ the harness is the way it is — read the relevant one before reversing a baked-
 The prompt fed to the agent each turn enforces: one task per turn, a strict
 spec → test → implement cycle, run the **full gate in CI order before every commit**
 (format, don't just check), mark a task done only when its full cycle is green, and a
-`Ralph-Task:` commit trailer with **no `Co-Authored-By`/AI attribution**. When changing
+`Ralph-Task:` commit trailer with **no `Co-Authored-By`/AI attribution**. The gate
+includes a **coverage threshold** — "tests pass" is not "the code is tested"; meet it by
+testing the real path (exclude genuinely-untestable code via pragma or escalate, never
+delete tests / lower the threshold). Coverage is a *supporting* gate (it catches lazy
+tests, not faked-precondition tests — the review gate catches that class). When changing
 the template, keep this contract intact and keep the `{{PLACEHOLDER}}` set closed (fill
-every one, add none) — `/ralph-init` substitutes them. A wrong gate command is the most
-damaging thing the scaffold can emit.
+every one, add none) — `/ralph-init` substitutes them. A wrong gate command (or
+threshold) is the most damaging thing the scaffold can emit.

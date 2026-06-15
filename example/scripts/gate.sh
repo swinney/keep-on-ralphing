@@ -7,11 +7,12 @@
 # the gate command must never be duplicated, or the three will drift.
 #
 # Run a FORMATTER, not just a format-CHECK: a passing-tests commit still fails CI
-# if it is unformatted.
+# if it is unformatted. The pytest step enforces a GLOBAL coverage floor (80%) —
+# "tests pass" is not "the code is tested."
 
 set -euo pipefail
 
 ruff format .
 ruff check .
 mypy .
-pytest
+pytest --cov=acme_widgets --cov-fail-under=80

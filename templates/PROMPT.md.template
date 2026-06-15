@@ -35,11 +35,15 @@ or tests to silence a finding. Do not pick a /tasks.md task while
    committing (do not commit red):
    `./scripts/gate.sh`
    This is the single source of the gate (the same script CI and the
-   pre-commit hook run), executing format → lint → type-check → test in CI
-   order. If it checks formatting, you must actually FORMAT (not just check):
-   a correct, passing-tests commit still fails CI if it is unformatted. The
-   pre-commit hook runs this script and BLOCKS the commit if it fails —
-   never bypass it with `git commit --no-verify`.
+   pre-commit hook run), executing format → lint → type-check → test (with
+   COVERAGE) in CI order. If it checks formatting, you must actually FORMAT (not
+   just check): a correct, passing-tests commit still fails CI if it is
+   unformatted. The gate enforces a coverage threshold — write tests that
+   exercise the REAL code path to meet it. If some code genuinely cannot be
+   reasonably tested, exclude it with the language's standard coverage pragma or
+   escalate to /docs/questions.md; NEVER delete tests or lower the threshold to
+   make the gate pass. The pre-commit hook runs this script and BLOCKS the commit
+   if it fails — never bypass it with `git commit --no-verify`.
 7. Mark the task complete in /tasks.md if and only if the full
    spec→test→implementation cycle for it is done and green.
 

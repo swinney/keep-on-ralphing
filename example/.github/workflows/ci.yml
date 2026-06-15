@@ -15,11 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- toolchain : matches the Acme Widgets Containerfile (ruff, mypy, pytest) -
+      # --- toolchain : matches the Acme Widgets Containerfile (ruff, mypy, pytest+cov) -
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install ruff mypy pytest
+      - run: pip install ruff mypy pytest pytest-cov
       # --- end toolchain ----------------------------------------------------------
 
       - name: gate

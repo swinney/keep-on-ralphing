@@ -11,11 +11,22 @@
 # sequencing — each command must succeed for the next to run.
 #
 # PLACEHOLDERS (the closed set):
-#   {{GATE_COMMAND}}  the full gate, in CI order, as one line
-#                     (e.g. `ruff format . && ruff check . && mypy . && pytest`)
+#   {{GATE_COMMAND}}  the full gate, in CI order, as one line. It MUST include a
+#                     test-COVERAGE check with a threshold, not just a test run
+#                     (e.g. `ruff format . && ruff check . && mypy . &&
+#                      pytest --cov=<pkg> --cov-fail-under=80`).
 #
 # Run a FORMATTER, not just a format-CHECK: a passing-tests commit still fails CI
 # if it is unformatted.
+#
+# Gate COVERAGE, not just test pass/fail: "tests pass" is not "the code is tested."
+# The default is a GLOBAL coverage floor (project-wide % must meet the threshold),
+# which is portable across tools and fits a project grown test-first. For a
+# brownfield repo where one legacy untested module would tank the global number,
+# switch to PATCH/diff coverage (gate only the lines this change touched, e.g.
+# `diff-cover`). Coverage is a SUPPORTING gate — it catches lazy/trivial tests, but
+# not tests that fake the precondition that matters; the independent-review gate
+# catches that class.
 
 set -euo pipefail
 

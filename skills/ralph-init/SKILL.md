@@ -46,12 +46,17 @@ Gather these, reading the repo; state each as "inferred X" or ask if unsure:
 - **Tests dir** — look for `tests/`, `test/`; default `tests`.
 - **Decisions dir** — look for `docs/decisions/`; default `docs/decisions`.
 - **Gate command** — read CI (`.github/workflows/*.yml`) for the lint/type/test
-  sequence; otherwise infer from the toolchain (e.g. Python →
-  `ruff format . && ruff check . && mypy . && pytest`). This MUST match what CI
-  runs, in CI order. Confirm it with the user.
-- **Toolchain install** — the exact tools the gate command invokes, as a
-  `RUN`/install block for the Containerfile (pin versions where you can read them
-  from lockfiles/config).
+  sequence; otherwise infer from the toolchain. The gate MUST include a
+  test-COVERAGE check with a threshold, not just a test run (e.g. Python →
+  `ruff format . && ruff check . && mypy . && pytest --cov=<pkg> --cov-fail-under=80`).
+  Default to a GLOBAL coverage floor; for a brownfield repo, prefer PATCH/diff
+  coverage instead (note this to the user). This MUST match what CI runs, in CI
+  order. **Confirm the gate AND the coverage threshold with the user** — a wrong or
+  too-aggressive threshold blocks every commit.
+- **Toolchain install** — the exact tools the gate command invokes, INCLUDING the
+  coverage tool (e.g. `pytest-cov`), as a `RUN`/install block for the Containerfile
+  (pin versions where you can read them from lockfiles/config). Add the same
+  coverage tool to the CI workflow's toolchain step.
 - **Container image name** — default `<project>-loop` (kebab-case).
 - **Runtime** — `podman` (this harness targets podman on Linux).
 
@@ -184,6 +189,11 @@ must not be committed.
 - Do not invent a gate command — read it from CI / confirm with the user. A wrong
   gate is the most damaging thing you can scaffold (it is now enforced by a hook
   AND CI, so a wrong gate blocks every commit).
+- The gate MUST include a coverage threshold, but never set it aggressively by
+  fiat — confirm the number with the user (a too-high threshold blocks every
+  commit). Coverage is a SUPPORTING gate: it catches lazy/trivial tests, not tests
+  that fake the precondition that matters — the independent-review gate and
+  real-artifact verification are what catch that class. Say so; don't oversell it.
 - The CI workflow's `{{TOOLCHAIN_INSTALL}}` is best-effort — CI runner setup can't
   be fully inferred. Always flag it for the user to confirm against the Containerfile.
 - Never overwrite existing files/dirs; preserve and report them as skipped.

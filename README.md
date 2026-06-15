@@ -63,7 +63,10 @@ The loop stops when a turn writes a reason to `STATUS.md`, after
 The scaffolded gate is **enforced**: `scripts/gate.sh` is the single source of the
 gate command, a pre-commit hook runs it and blocks red commits, and a CI workflow
 runs the same script. A red gate therefore yields no commit — which the loop counts
-as a stall — so broken work halts the loop for review instead of compounding.
+as a stall — so broken work halts the loop for review instead of compounding. The
+gate also includes a **coverage threshold** (a global floor by default), so "tests
+pass" can't stand in for "the code is tested" — a supporting check alongside the
+review gate above.
 
 The hook is installed via `core.hooksPath` (the Makefile `hooks` target), which is
 repo-wide: once set, it gates *every* commit, host or container. The gate runs where

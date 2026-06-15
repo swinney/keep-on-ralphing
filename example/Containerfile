@@ -4,9 +4,10 @@
 FROM ralph-base:v1
 
 # --- project toolchain: the exact tools the gate command runs ---------------
-# Gate: ruff format . && ruff check . && mypy . && pytest
+# Gate: ruff format . && ruff check . && mypy . && pytest --cov=acme_widgets --cov-fail-under=80
 RUN pip install --no-cache-dir \
         ruff==0.15.15 \
         mypy==2.1.0 \
-        pytest
+        pytest \
+        pytest-cov
 # --- end project-specific block ---------------------------------------------

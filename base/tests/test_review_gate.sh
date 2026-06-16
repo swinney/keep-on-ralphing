@@ -261,6 +261,42 @@ git -C "$WS" remote remove origin
   || bad "default did not behave as ON (should have refused without a remote)"
 cleanup
 
+# --- 11. gate ON configures token-backed HTTPS push (gh setup-git + SSH->HTTPS) -
+new_gate_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+RALPH_ARGS="" run_gate >/dev/null 2>&1
+grep -q "auth setup-git" "$STUB/gh.log" \
+  && ok "gate on runs 'gh auth setup-git' (token-backed git credential)" \
+  || bad "runner did not configure gh as the git credential helper"
+git config --file "$HOME_DIR/.gitconfig" --get url."https://github.com/".insteadOf 2>/dev/null | grep -q "git@github.com:" \
+  && ok "gate on rewrites SSH GitHub remotes to HTTPS for push" \
+  || bad "runner did not set the SSH->HTTPS insteadOf rewrite"
+cleanup
+
+# --- 12. a failed branch push is surfaced, not silently swallowed -----------
+new_gate_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+# Point origin at a non-existent path so `git push` fails (not a github URL, so
+# the insteadOf rewrite leaves it alone — the push genuinely cannot land).
+git -C "$WS" remote set-url origin "$WS/does-not-exist.git"
+out=$(RALPH_ARGS="" run_gate 2>&1)
+printf '%s' "$out" | grep -q "could not push" \
+  && ok "failed push is reported (not swallowed by || true)" \
+  || bad "a failing push was hidden — expected a 'could not push' message"
+cleanup
+
 echo
 echo "review-gate tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

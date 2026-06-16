@@ -241,7 +241,8 @@ merge_pr() { gh pr merge "$1" --merge >/dev/null 2>&1; }
 run_review_gate() {
   REVIEW_GATE_HALT=0
   local num status waited findings
-  git push -u origin "$(working_branch)" >/dev/null 2>&1 || true
+  git push -u origin "$(working_branch)" >/dev/null 2>&1 ||
+    echo "ralph: review-gate could not push $(working_branch) to origin — check GH_TOKEN / remote (the PR may review stale commits)"
   num=$(ensure_pr)
   if [ -z "$num" ]; then
     echo "ralph: review-gate could not resolve a PR for $(working_branch) — skipping this turn"
@@ -361,6 +362,11 @@ if [ "${RALPH_REVIEW_GATE:-1}" = 1 ]; then
     { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not on PATH — refusing to start (rebuild the base image; gh ships in ralph-base)" >&2; exit 1; }
   gh auth status >/dev/null 2>&1 ||
     { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not authenticated — refusing to start (forward a GH_TOKEN into the container; the Makefile derives it from 'gh auth token')" >&2; exit 1; }
+  # Push over HTTPS using the token: make gh the git credential helper and rewrite
+  # SSH GitHub remotes to HTTPS, so `git push` works in the container (which has no
+  # ssh binary or key). Idempotent; only when the gate is on.
+  gh auth setup-git >/dev/null 2>&1 || true
+  git config --global url."https://github.com/".insteadOf "git@github.com:" >/dev/null 2>&1 || true
   git remote | grep -q . ||
     { echo "ralph: RALPH_REVIEW_GATE=1 but no git remote is configured — refusing to start" >&2; exit 1; }
   if [ "$(working_branch)" = "$(base_branch)" ]; then

@@ -172,7 +172,10 @@ both required in one release.
   like `git`) and the consumer `Makefile` forwards a host-derived `GH_TOKEN`
   (`export GH_TOKEN ?= $(shell gh auth token)` + `-e GH_TOKEN`) — host login alone does
   not authenticate the in-container runner. `make test` stubs `gh` and CI does not build
-  the image, so image contents are covered by `make smoke-base`, not the unit suite.
+  the image, so image contents are covered by `make smoke-base`, not the unit suite. The
+  runner pushes over **HTTPS using the token** — at startup it runs `gh auth setup-git` and
+  rewrites `git@github.com:`→`https://github.com/` (the container has no `ssh`/key), so a
+  consumer's SSH remote still pushes; a failed push is surfaced, never silently swallowed.
 
 ### Invariants to preserve when editing
 

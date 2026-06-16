@@ -17,11 +17,20 @@ BASE_IMAGE ?= ralph-base:v1
 WORKSPACE  := $(CURDIR)
 CLAUDE_DIR := $(WORKSPACE)/.ralph/claude-home
 
+# The review gate (ON by default) runs `gh` in the RUNNER, inside the container, so
+# it needs a GitHub token there. The host authenticates via the keyring (no token in
+# ~/.config/gh), so we derive one with `gh auth token` and forward it as GH_TOKEN.
+# `export` puts it in the recipe env; `-e GH_TOKEN` (no inline value) forwards it
+# without exposing the token in `ps`/argv. A pre-set GH_TOKEN (e.g. CI) wins.
+# Not needed when RALPH_REVIEW_GATE=0 (offline loop).
+export GH_TOKEN ?= $(shell gh auth token 2>/dev/null)
+
 # --userns=keep-id is PODMAN-SPECIFIC (host UID/GID mapping). If RUNTIME=docker,
 # drop it or replace with `--user $$(id -u):$$(id -g)`.
 RUN_FLAGS := \
   --userns=keep-id \
   -e RALPH_MODEL \
+  -e GH_TOKEN \
   -v $(WORKSPACE):/workspace \
   -v $(CLAUDE_DIR):/home/claude/.claude
 

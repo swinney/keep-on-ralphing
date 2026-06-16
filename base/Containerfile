@@ -38,6 +38,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Claude Code, installed globally so `claude` is on PATH for any user.
 RUN npm install -g @anthropic-ai/claude-code
 
+# GitHub CLI (`gh`) — the outer-loop review gate (ON by default) runs entirely in
+# the RUNNER, which executes in this container, so `gh` must live here (like git).
+# Official apt repo with a signed-by keyring; key fetched with the curl installed
+# above. Auth is provisioned at run time via GH_TOKEN, never baked into the image.
+RUN mkdir -p -m 755 /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+         > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
 # The loop machinery, baked onto PATH. This is the single source of the runner;
 # consumers get it from the image, never by vendoring scripts/.
 COPY scripts/ralph.sh scripts/until_reset.py /usr/local/bin/

@@ -358,9 +358,9 @@ echo "ralph: starting at turn $turn ($(date -Is)) — timeout ${turn_timeout}s, 
 review_rounds=0
 if [ "${RALPH_REVIEW_GATE:-1}" = 1 ]; then
   command -v gh >/dev/null 2>&1 ||
-    { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not on PATH — refusing to start" >&2; exit 1; }
+    { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not on PATH — refusing to start (rebuild the base image; gh ships in ralph-base)" >&2; exit 1; }
   gh auth status >/dev/null 2>&1 ||
-    { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not authenticated — refusing to start" >&2; exit 1; }
+    { echo "ralph: RALPH_REVIEW_GATE=1 but 'gh' is not authenticated — refusing to start (forward a GH_TOKEN into the container; the Makefile derives it from 'gh auth token')" >&2; exit 1; }
   git remote | grep -q . ||
     { echo "ralph: RALPH_REVIEW_GATE=1 but no git remote is configured — refusing to start" >&2; exit 1; }
   if [ "$(working_branch)" = "$(base_branch)" ]; then

@@ -99,10 +99,12 @@ review, set `RALPH_REVIEW_GATE=0`.
 ## The base image
 
 `ralph-base:v1` is built locally from `base/Containerfile` (no registry). It is
-`python:3.12-slim` + git/node/Claude Code + the runner machinery on PATH + a
+`python:3.12-slim` + git/node/`gh`/Claude Code + the runner machinery on PATH + a
 UID/GID-matched non-root user (so bind-mounted files are host-owned under rootless
-podman). A consumer's Containerfile is just `FROM ralph-base:v1` plus its own
-toolchain. Pushing to a registry (GHCR) is an optional later add — never required.
+podman). `gh` is included because the review-gate runner runs *in the container*; the
+consumer `Makefile` forwards a host-derived `GH_TOKEN` to authenticate it. A consumer's
+Containerfile is just `FROM ralph-base:v1` plus its own toolchain. Pushing to a registry
+(GHCR) is an optional later add — never required.
 
 The build material ships **inside the plugin** (`base/` + the `Makefile`), so
 `/ralph-build-base` builds the image clone-free via

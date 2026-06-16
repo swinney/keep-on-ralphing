@@ -162,6 +162,11 @@ refusal at first run:
   <url>`); a GitHub remote is required.
 - Check `gh auth status` — if unauthenticated, tell the user to run `gh auth
   login` (an interactive step they run on the host).
+- Check `gh auth token` returns a value — the runner runs `gh` *inside the
+  container*, so the loop forwards a host-derived `GH_TOKEN` (the generated
+  `Makefile` does `export GH_TOKEN ?= $(shell gh auth token)` + `-e GH_TOKEN`).
+  Host `gh auth status` alone does NOT authenticate the in-container runner; a
+  derivable token does. Confirm the generated `Makefile` forwards `GH_TOKEN`.
 - Confirm the loop will run on a non-base feature branch (not directly on the
   default branch).
 - Report each as ready/blocked (§4). If a precondition cannot be met now, tell the

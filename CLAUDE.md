@@ -166,7 +166,13 @@ both required in one release.
   `RALPH_AUTO_MERGE` (separate, default off) controls whether a PASSED PR merges or is
   parked for a human. **The load-bearing principle: the container agent stays
   GitHub-blind — all `git`/`gh` work is the runner's — so the gate is agent-agnostic
-  and the verdict wait reuses the usage-limit pause (not a stall).**
+  and the verdict wait reuses the usage-limit pause (not a stall).** Note the subtlety:
+  only the *agent* is GitHub-blind; the *runner* (`ralph.sh`) runs **in the container**
+  and needs `gh` + auth there. So `gh` ships in `ralph-base` (the base image installs it,
+  like `git`) and the consumer `Makefile` forwards a host-derived `GH_TOKEN`
+  (`export GH_TOKEN ?= $(shell gh auth token)` + `-e GH_TOKEN`) — host login alone does
+  not authenticate the in-container runner. `make test` stubs `gh` and CI does not build
+  the image, so image contents are covered by `make smoke-base`, not the unit suite.
 
 ### Invariants to preserve when editing
 

@@ -7,9 +7,15 @@ BASE_IMAGE ?= ralph-base:v1
 WORKSPACE  := $(CURDIR)
 CLAUDE_DIR := $(WORKSPACE)/.ralph/claude-home
 
+# The review gate (ON by default) runs `gh` in the runner inside the container, so
+# forward a host-derived token as GH_TOKEN. `export` + `-e GH_TOKEN` keeps it out
+# of argv. Not needed when RALPH_REVIEW_GATE=0.
+export GH_TOKEN ?= $(shell gh auth token 2>/dev/null)
+
 RUN_FLAGS := \
   --userns=keep-id \
   -e RALPH_MODEL \
+  -e GH_TOKEN \
   -v $(WORKSPACE):/workspace \
   -v $(CLAUDE_DIR):/home/claude/.claude
 

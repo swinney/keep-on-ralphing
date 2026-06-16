@@ -31,11 +31,21 @@
 #   untested modules don't tank the number and fail your first commit. Scope to
 #   the new paths (simplest, tool-native):
 #     Python   pytest --cov=<new_pkg_or_path> --cov-fail-under=80
-#     vitest   vitest run --coverage --coverage.include='<feature-dir>/**' \
+#     vitest   vitest run --coverage --coverage.all \
+#                --coverage.include='<feature-dir>/**' \
 #                --coverage.thresholds.lines=80
 #     go       go test -cover ./<feature-pkg>/...
 #   Or true diff coverage against the base branch (stricter, needs a tool + base
 #   ref): generate an lcov/coverage.xml report, then `diff-cover` it.
+#
+#   vitest specifics: `--coverage.all` is load-bearing for SCOPED mode — without it
+#   coverage counts only files some test IMPORTED, so an untested module in the scoped
+#   dir silently passes (an easy way to game the gate); `--coverage.all` forces every
+#   matched file to count. Provider: the default `v8` is right for almost all repos
+#   (fast, no transpile, and Istanbul-accurate via AST remapping since vitest 3.2 /
+#   default in 4.0); switch `--coverage.provider=istanbul` only for a non-V8 runtime
+#   (browser-mode Firefox, Bun, Cloudflare Workers). Add `@vitest/coverage-v8` (or
+#   `@vitest/coverage-istanbul`) to devDependencies + the Containerfile/CI toolchain.
 #
 # Coverage is a SUPPORTING gate — it catches lazy/trivial tests, but not tests that
 # fake the precondition that matters; the independent-review gate catches that class

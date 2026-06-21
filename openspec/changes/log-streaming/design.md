@@ -115,6 +115,14 @@ add noise to projects that never attach one.
 - **Narration/agent-output interleaving or partial flushes** → sequential single-process writes with
   the agent pipe drained before post-turn narration (D4); no concurrent writers, so no locking.
 - **Timestamp portability** → Python (base-image guaranteed), not `awk strftime`/busybox (D2).
+- **`python3`/prefixer on the critical output pipe** → `python3` is OPTIONAL in this runner
+  (`emit_status` no-ops without it; the preflight requires only `git`/`claude`/`timeout`), so a missing
+  interpreter/helper must not break the pipe. If it could, the fan-out's sink would close and `tee`
+  would take SIGPIPE once the agent exceeds a pipe buffer — truncating `turn-N.txt`/stdout and masking
+  the agent's exit code with 141. Mitigation: at startup, if `RALPH_LIVE_LOG=1` but `python3` or
+  `ralph_prefix.py` is unavailable, disable live logging for the run and warn (graceful degrade,
+  matching `emit_status`) rather than fail fast. Covered by a test that runs from a `script_dir`
+  lacking the prefixer.
 - **`live.log` grows unbounded over a long run** → accepted; it is gitignored and per-workspace, like
   `status.jsonl`. Rotation/truncation is the aggregator's or operator's job (truncate between runs),
   explicitly out of scope.

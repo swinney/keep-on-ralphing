@@ -176,6 +176,36 @@ grep -q 'TERMMARK_42' "$WS/.ralph/log/turn-1.txt" \
   || bad "turn-N.txt was altered by the prefixer"
 cleanup
 
+# --- 6. prefixer unavailable → graceful degrade, no broken pipe -------------
+# Run a copied runner from a script_dir that has ralph.sh + until_reset.py but
+# NOT ralph_prefix.py, so the fan-out's prefixer cannot start. The turn must NOT
+# break (no SIGPIPE/141, no truncated turn-N.txt); live.log is disabled + warned.
+new_ws
+SDIR="$WS/sdir"
+mkdir -p "$SDIR"
+cp "$HERE/../scripts/ralph.sh" "$HERE/../scripts/until_reset.py" "$SDIR/"
+chmod +x "$SDIR/ralph.sh"
+cat >"$STUB/count-1.sh" <<'S'
+echo "DEGRADE_MARK"
+git commit --allow-empty -qm t1
+S
+( cd "$WS" && PATH="$STUB/bin:$PATH" HOME="$HOME_DIR" \
+  RALPH_WORKSPACE="$WS" RALPH_STATE_DIR=.ralph RALPH_REVIEW_GATE=0 \
+  bash "$SDIR/ralph.sh" --once ) >"$WS/out.txt" 2>"$WS/err.txt"
+ec=$?
+[ "$ec" -eq 0 ] && ok "missing prefixer: turn still exits 0 (no broken pipe / 141)" \
+  || bad "missing prefixer broke the turn (exit=$ec)"
+grep -q 'DEGRADE_MARK' "$WS/.ralph/log/turn-1.txt" \
+  && ok "missing prefixer: turn-N.txt not truncated" \
+  || bad "missing prefixer truncated turn-N.txt"
+[ ! -f "$WS/.ralph/log/live.log" ] \
+  && ok "missing prefixer: live.log gracefully disabled" \
+  || bad "live.log written despite missing prefixer"
+grep -q 'disabling live.log' "$WS/err.txt" \
+  && ok "missing prefixer: warned on stderr" \
+  || bad "no warning emitted when prefixer unavailable"
+cleanup
+
 echo
 echo "live.log tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

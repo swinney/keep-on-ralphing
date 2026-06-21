@@ -131,6 +131,18 @@ turn_file="$state_dir/turn"
 turn=$(cat "$turn_file" 2>/dev/null || echo 0)
 live_log="$state_dir/log/live.log"
 
+# The agent-output fan-out pipes through python3 + ralph_prefix.py. python3 is
+# OPTIONAL in this runner (emit_status no-ops without it; the preflight does not
+# require it), so don't let live logging turn a missing interpreter/helper into a
+# broken output pipe: if the prefixer can't start, the fan-out's sink closes and
+# tee takes SIGPIPE once the agent exceeds a pipe buffer — truncating turn-N.txt /
+# stdout and masking the agent's exit code with 141. Degrade gracefully instead.
+if [ "$live_log_enabled" = 1 ] &&
+  { ! command -v python3 >/dev/null 2>&1 || [ ! -f "$script_dir/ralph_prefix.py" ]; }; then
+  echo "ralph: RALPH_LIVE_LOG=1 but python3 or ralph_prefix.py is unavailable — disabling live.log for this run" >&2
+  live_log_enabled=0
+fi
+
 model_args=()
 [ -n "${RALPH_MODEL:-}" ] && model_args=(--model "$RALPH_MODEL")
 

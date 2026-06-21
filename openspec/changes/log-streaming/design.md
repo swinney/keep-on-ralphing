@@ -51,19 +51,26 @@ per-line ISO timestamp — so emit-time wins. Python 3.12 is guaranteed in the b
 `until_reset.py` precedent makes a second tiny helper in-grain. (The runner script itself stays
 bash 3.2-safe; the helper runs in-container where Python exists.)
 
-### D3 — Pipe ordering preserves `PIPESTATUS` and the usage-limit grep
-The hot path becomes:
+### D3 — Tee fan-out preserves the terminal stream, `PIPESTATUS`, and the usage-limit grep
+The hot path becomes a `tee` **fan-out** (process substitution), so one copy stays on the runner's
+stdout — the live terminal / `podman logs -f` view — while a prefixed copy is written to `live.log`:
 ```
 stdbuf -oL -eL timeout -k 30 "$turn_timeout" claude … 2>&1 \
-  | tee "$log" \
-  | python3 /usr/local/bin/ralph_prefix.py "$turn" >> "$live"
+  | tee "$log" >(python3 "$script_dir/ralph_prefix.py" "$turn" >> "$live")
 turn_ec=${PIPESTATUS[0]}
 ```
-In a three-stage pipe `${PIPESTATUS[0]}` is still the agent stage, so exit-code detection is
-unchanged. `tee` writes the **raw** (unprefixed) output to `turn-N.txt` *before* the prefixer, so the
-usage-limit grep — which reads `turn-N.txt` — sees byte-identical content to today. The prefixer is the
-terminal stage; its own exit code is irrelevant. *Why this ordering:* prefixing before `tee` would
-change what `turn-N.txt` and the grep observe — rejected.
+The pipe is two stages (agent | tee), so `${PIPESTATUS[0]}` is still the agent stage and exit-code
+detection is unchanged. `tee` writes the **raw** (unprefixed) output to `turn-N.txt`, to its own stdout
+(the terminal — exactly as today), *and* fans a copy into the process-substitution prefixer that
+appends to `live.log`. So the usage-limit grep — which reads the raw `turn-N.txt` — sees byte-identical
+content to today, **and a no-aggregator loop's terminal output is unchanged** (the compatibility goal).
+The prefixer is invoked as `$script_dir/ralph_prefix.py`, matching how `until_reset.py` is run
+(`ralph.sh:403`) — not a bare name (which `python3` would not find on PATH) nor a hardcoded
+`/usr/local/bin` path. *Why a fan-out, not a linear pipe:* feeding `tee`'s stdout into the prefixer (as
+a 3rd pipe stage) would consume the terminal copy, silently blanking interactive/`podman logs` output —
+rejected. *Caveat:* process substitution is async — the shell does not wait for the prefixer, so
+`live.log` can lag a turn's final lines; the implementation closes/drains it before relying on
+completeness. Process substitution is bash 3.2-safe on the Linux target.
 
 ### D4 — Runner narration via a `narrate()` helper
 Introduce `narrate "msg"` that (a) echoes to the terminal exactly as the current `echo "ralph: …"`
@@ -83,20 +90,28 @@ everything else in the runner is a config key, and a disk-constrained or privacy
 deserves the escape hatch — consistent with `environment > ralph.conf > default`.
 
 ### D6 — Vector recipe ships as a kit reference doc, not scaffolded
-A new `docs/` recipe: a Vector `file` source over `~/projects/*/.ralph/{status.jsonl,log/live.log}`, a
-`remap` (VRL) transform (`. = parse_json!(.message)` for the JSONL; derive `.project` from the `.file`
-path for multi-loop), and a `console` sink + `vector top` for the zero-backend realtime view, with a
-one-line note that swapping to `elasticsearch`/`loki`/`datadog_logs` is a sink change. *Why docs not
-scaffold:* the aggregator is optional external tooling; scaffolding it into every consumer (like
-`STATUS.md`/`questions.md`) would add noise to projects that never attach one.
+A new `docs/` recipe. The two files have **different formats**, so the recipe MUST NOT run one blanket
+JSON parse over both: it uses **two `file` sources** (or one source plus a path-keyed conditional) — a
+`status.jsonl` source whose `remap` does `. = parse_json!(.message)`, and a separate `live.log` source
+left as text (optionally lifting the `turn=<n>` prefix into a field). `parse_json!` is never applied to
+`live.log`, whose lines are plain text; a blanket `parse_json!` would abort on every text line and
+drop/poison those events. A shared downstream transform derives `.project` from `.file` for multi-loop;
+a `console` sink + `vector top` give the zero-backend realtime view, with a one-line note that swapping
+to `elasticsearch`/`loki`/`datadog_logs` is a sink change. *Why docs not scaffold:* the aggregator is
+optional external tooling; scaffolding it into every consumer (like `STATUS.md`/`questions.md`) would
+add noise to projects that never attach one.
 
 ## Risks / Trade-offs
 
 - **Prefixer becomes a fork-per-line hotspot** → one long-lived, line-buffered Python process (D2),
   not a per-line `date`/`awk` fork.
-- **`PIPESTATUS` / usage-limit regression** → pipe ordering keeps `[0]` = agent and `turn-N.txt` raw
+- **`PIPESTATUS` / usage-limit regression** → the `tee` fan-out keeps `[0]` = agent and `turn-N.txt` raw
   (D3); covered by a test asserting a non-zero agent exit and a usage-limit message are still detected
   with the aggregate log active.
+- **Dropped terminal / `podman logs` stream** → a linear `… | tee | prefixer` pipe would consume the
+  terminal copy, blanking interactive and `podman logs -f` output for a no-aggregator loop; the `tee`
+  fan-out (D3) keeps a copy on stdout. Covered by a test asserting agent output still reaches stdout
+  with `RALPH_LIVE_LOG=1` and no aggregator.
 - **Narration/agent-output interleaving or partial flushes** → sequential single-process writes with
   the agent pipe drained before post-turn narration (D4); no concurrent writers, so no locking.
 - **Timestamp portability** → Python (base-image guaranteed), not `awk strftime`/busybox (D2).

@@ -53,8 +53,8 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
 
 # The loop machinery, baked onto PATH. This is the single source of the runner;
 # consumers get it from the image, never by vendoring scripts/.
-COPY scripts/ralph.sh scripts/until_reset.py /usr/local/bin/
-RUN chmod +x /usr/local/bin/ralph.sh /usr/local/bin/until_reset.py
+COPY scripts/ralph.sh scripts/until_reset.py scripts/ralph_prefix.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/ralph.sh /usr/local/bin/until_reset.py /usr/local/bin/ralph_prefix.py
 
 # Non-root user whose UID/GID match the invoking host user (override with
 # --build-arg). With rootless Podman this makes files written under /workspace

@@ -153,6 +153,15 @@ both required in one release.
   `current.json` (heartbeat), `status.jsonl` (one git-derived record per completed turn),
   `log/turn-<n>.txt` (line-buffered per-turn output), `turn` (counter). The
   `/ralph-status` skill reads these directly — there is no shipped status script.
+- **Aggregate log for an external aggregator (`RALPH_LIVE_LOG`, ON by default).** The runner also
+  writes `log/live.log` — one append-only tail target interleaving runner narration (`narrate()`) with
+  agent output, each line `turn=<n>`-prefixed + ISO-timestamped. Agent output is fanned in via a `tee`
+  process substitution (`tee "$log" >(ralph_prefix.py "$turn" >> live.log)`) so a copy still reaches
+  stdout and `${PIPESTATUS[0]}` stays the agent's exit code; `turn-N.txt`/`status.jsonl` are unchanged.
+  The kit ships **no** aggregator — `docs/recipes/vector-console.md` is the harness-as-source recipe
+  (network-isolation preserved; aggregation lives in the operator's own pipeline). `ralph_prefix.py` is
+  the third baked runner helper alongside `ralph.sh`/`until_reset.py`, so a change here is a two-channel
+  release like the rest of `base/scripts/`.
 - **Outer-loop review gate (`RALPH_REVIEW_GATE`, ON by default — the loop is
   GitHub-dependent).** After a committing turn, the *runner* (never the agent) pushes
   the branch, ensures a PR, requests an independent review (GitHub Copilot by default;

@@ -25,11 +25,23 @@ the repo root, then read:
    `base/` and the host UID/GID) or `stale: <reason>` (rebuild with
    `/ralph-build-base`). Read-only — it never rebuilds. If the helper/runtime is
    unavailable, report "base-image freshness: unknown" and move on; never fail.
+1c. **Workspace lock** — read `<state_dir>/lock` (the one-orchestrator PID lock).
+   If absent, report "lock: none (no loop holds this workspace)". If present, show
+   the recorded PID and cross-reference the container-running check above for
+   liveness: a present lock **with** a running loop container = the loop holds it;
+   a present lock **without** a running container = a likely **stale lock** from a
+   crashed loop (the next `ralph.sh` reclaims it automatically — flag it, don't act).
+   Do NOT `kill -0` the PID from here: it is the loop's own PID-namespace value (the
+   loop runs in the container), so a host liveness check is meaningless. Read-only.
 2. **Current turn** — `<state_dir>/current.json` (the heartbeat: turn, task,
    model, state, started). If absent, "no heartbeat yet".
 3. **Recent turns** — the last ~10 lines of `<state_dir>/status.jsonl`; each line
    is a JSON record with turn, model, exit_code, committed, sha, task. Summarize
-   one per line, marking committed turns.
+   one per line, marking committed turns. **Show the `model` per turn** — it is the
+   model the runner actually dispatched that turn, which work-class dispatch can
+   vary between turns (a `(stateful)`-tagged task may run a stronger model than an
+   untagged one), so surfacing it makes the dispatch visible. `"default"` means no
+   `--model` was passed (the account default).
 4. **Stop signal** — `STATUS.md`. Treat it as a stop reason **only if it has
    non-whitespace content** (mirror the runner's rule — a blank/whitespace-only
    file is NOT a stop). Show the reason if stopped.
@@ -55,9 +67,10 @@ the repo root, then read:
 
 ## How to report
 
-Print a compact digest, in this order: running state → current turn → recent
-turns (newest last) → STATUS.md stop state → review-gate state (if on) →
-notifications + blocked state → recent commits → live-log hint (if present). Keep it scannable
+Print a compact digest, in this order: running state → base-image freshness →
+workspace lock → current turn → recent turns (newest last, with per-turn model) →
+STATUS.md stop state → review-gate state (if on) → notifications + blocked state →
+recent commits → live-log hint (if present). Keep it scannable
 (a few lines each). Don't editorialize; report the facts. If the state dir
 doesn't exist yet, say the loop has not run in this repo.
 

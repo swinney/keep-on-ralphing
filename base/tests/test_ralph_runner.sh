@@ -53,6 +53,16 @@ c_file="$STUB/count"
 n=\$(cat "\$c_file" 2>/dev/null || echo 0)
 n=\$((n + 1))
 echo "\$n" >"\$c_file"
+# Record the --model arg (or "default" when unset) for THIS invocation so
+# work-class dispatch is assertable per turn without a real agent.
+model="default"
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --model) model="\${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "\$model" >>"$STUB/models"
 snippet="$STUB/count-\${n}.sh"
 [ -f "\$snippet" ] && . "\$snippet"
 exit \${STUB_EXIT:-0}

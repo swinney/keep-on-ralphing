@@ -26,6 +26,7 @@ plugin install path and read `templates/` under it:
 - `templates/STATUS.md.seed`
 - `templates/questions.md.seed`
 - `templates/specs-README.md.template`
+- `templates/operator-checklist.md.template`
 
 The fully-resolved `example/` directory in the same plugin is your golden
 reference for what good output looks like.
@@ -94,7 +95,11 @@ file or directory that already exists** — leave it intact and record it as
 - **`ralph.conf`** — from `ralph.conf.example`, with the inferred values
   (RALPH_CONTAINER=<image>, RALPH_RUNTIME=podman, paths, etc.). This includes the
   **review-gate keys** (`RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`,
-  `RALPH_REVIEW_MAX_ROUNDS`, `RALPH_BASE_BRANCH`, `RALPH_REVIEWER`). The loop is
+  `RALPH_REVIEW_MAX_ROUNDS`, `RALPH_BASE_BRANCH`, `RALPH_REVIEWER`) and the
+  **work-class dispatch table** (the commented `RALPH_MODEL_<CLASS>` keys). Leave
+  the dispatch keys **inert** (commented/empty) — the default model stays
+  `RALPH_MODEL`, so behaviour is unchanged until the operator tags tasks and fills
+  the table; do not enable a class→model mapping on the user's behalf. The loop is
   **GitHub-dependent by default**: keep `RALPH_REVIEW_GATE=1` and ensure GitHub is
   ready (§3d). Set it to `0` only if the user explicitly asks for an offline loop
   with no review. (`RALPH_AUTO_MERGE` stays `0` — merging is still the user's call.)
@@ -103,7 +108,9 @@ file or directory that already exists** — leave it intact and record it as
   PROMPT placeholder — it lives only in `scripts/gate.sh` (below); the prompt just
   references that script. Keep the whole portable contract intact (one task/turn,
   spec→test→implement, run `./scripts/gate.sh` before commit, stop conditions, the
-  no-`Co-Authored-By` rule, and the `review-findings.md`-comes-first clause).
+  no-`Co-Authored-By` rule, the `review-findings.md`-comes-first clause, the
+  agent-facing **Discipline** clauses, and the **work-class tag convention** that
+  ties tasks.md tags to the dispatch table above).
 - **`Containerfile`** — from `Containerfile.template`: `FROM ralph-base:v1` plus
   the project's toolchain block.
 - **`Makefile`** — from `Makefile.template`, with IMAGE/RUNTIME filled. It carries
@@ -143,6 +150,13 @@ file or directory that already exists** — leave it intact and record it as
   two, offer to write that as the first REAL spec (`<SPECS_DIR>/<system>.md`);
   otherwise leave the dir with just the guide and let the loop's normal
   spec→test→implement workflow take over.
+- An **operator checklist** — from `operator-checklist.md.template` (verbatim, no
+  placeholders), written as `docs/operator-checklist.md`, ONLY if absent. It carries
+  the three pre-action checklists (before backgrounding a job / reproducing a failure
+  / asserting a causal "why"), the four autonomy preconditions, the
+  velocity-targets-serial-latency guidance, and the "output ≠ discipline" caution.
+  This is the operator's substitute for the gate the harness cannot apply to *your*
+  actions — scaffold it so it travels with the project, like `STATUS.md`/`questions.md`.
 
 ### 3d. Review gate (ON by default — ensure GitHub during init)
 
@@ -185,8 +199,17 @@ must not be committed.
   **skipped (already present)** — covering config (§3a), the gate components
   `scripts/gate.sh` / `hooks/pre-commit` / `.github/workflows/ci.yml` (§3b), and
   the readiness items: specs/tests/decisions dirs, `STATUS.md`, `docs/questions.md`,
-  the specs-dir guide and any first spec captured (§3c). If you hit a hooks-path
-  conflict, surface the warning here.
+  the specs-dir guide and any first spec captured, and
+  `docs/operator-checklist.md` (§3c). If you hit a hooks-path conflict, surface
+  the warning here.
+- Print an **autonomy note**: point the operator to `docs/operator-checklist.md`
+  and state plainly that unattended (walk-away) operation is a **gated opt-in** —
+  it requires all four preconditions (well-specified work, model matched from turn 1,
+  operator genuinely absent, and for fan-out single-unit time dominating
+  coordination). Do NOT enable unattended assumptions for the user (the dispatch
+  table ships inert, `RALPH_AUTO_MERGE` stays off). If the work isn't well-specified
+  or the operator will be watching, recommend running supervised (`make loop-once`,
+  or `make loop` with eyes on it).
 - Note the **gating reach**: once `make build`/`loop` sets `core.hooksPath`, the
   gate applies to EVERY commit in the repo — host or container — because
   `.git/config` is shared. Tell the user that host-side committers need the gate's

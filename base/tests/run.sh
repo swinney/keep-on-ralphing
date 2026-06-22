@@ -35,6 +35,14 @@ echo "== review gate tests =="
 bash "$here/test_review_gate.sh" || rc=1
 
 echo
+echo "== work-class model dispatch tests =="
+bash "$here/test_work_dispatch.sh" || rc=1
+
+echo
+echo "== one-orchestrator lock tests =="
+bash "$here/test_orchestrator_lock.sh" || rc=1
+
+echo
 echo "== outbound notification tests =="
 bash "$here/test_notify.sh" || rc=1
 

@@ -35,16 +35,20 @@ what invoking this skill does. Never hand the user a frozen cache path to reuse.
    option, run the shared decision helper and act on its verdict:
 
    ```sh
-   bash "$CLAUDE_PLUGIN_ROOT/base/scripts/base_freshness.sh"   # exit 0 = current, 1 = stale
+   bash "$CLAUDE_PLUGIN_ROOT/base/scripts/base_freshness.sh"   # exit 0 current, 1 stale/unknown, 2 internal error
    ```
 
    It declares `ralph-base:v1` **current** only when its baked provenance stamp
    matches the bundled `base/` (`base_version.sh`) AND its baked UID/GID match the
-   host's `id -u`/`id -g`. If it prints `current:` (exit 0), report "already current"
-   and **skip the build** — do not rebuild. If it prints `stale: …` (exit 1, the
-   image is missing, the runner changed, or the UID/GID differ) — or the user forced
-   it — proceed to build. This makes the skill safe to run routinely / after every
-   `/plugin update`.
+   host's `id -u`/`id -g`. Act on the exit code:
+   - **exit 0** (`current:`) — report "already current" and **skip the build**.
+   - **exit 1** (`stale:`/`unknown:` — image missing, runner changed, UID/GID
+     differ, or runtime absent) **or the user forced it** — proceed to build.
+   - **exit 2** (`error:` — the bundled stamp could not be computed: a missing
+     source or no sha256 tool) — STOP and report the broken setup; do NOT blindly
+     rebuild (the build would hit the same failure).
+
+   This makes the skill safe to run routinely / after every `/plugin update`.
 
 3. **Build (when stale or forced).** Run, from the plugin root so the Makefile's relative paths resolve:
 

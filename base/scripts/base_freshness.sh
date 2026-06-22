@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 # Decide whether the base image is CURRENT for THIS machine or needs a rebuild.
-# Prints a verdict line and exits 0 (current) or 1 (stale). This is the ONE
-# definition of the freshness rule — shared by /ralph-build-base (skip vs
-# rebuild), /ralph-status (drift reporting), and the unit test (which stubs the
-# runtime + `id`).
+# Prints a verdict line. Exit contract:
+#   0  current        — skip the rebuild (the only "do nothing" verdict)
+#   1  stale/unknown   — rebuild or attend (stamp changed, image missing/unstamped,
+#                        UID/GID mismatch, or the runtime is not on PATH to inspect)
+#   2  internal error  — could NOT compute the bundled stamp (broken setup: a
+#                        missing source file or no sha256 tool). This is NOT a
+#                        freshness verdict; a caller should report it, not blindly
+#                        rebuild.
+# This is the ONE definition of the freshness rule — shared by /ralph-build-base
+# (skip vs rebuild), /ralph-status (drift reporting), and the unit test (which
+# stubs the runtime + `id`).
 #
 # The image is current iff BOTH: its baked provenance stamp equals the bundled
 # base/ stamp (base_version.sh), AND its baked UID/GID equal the invoking host's

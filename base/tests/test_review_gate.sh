@@ -297,6 +297,39 @@ printf '%s' "$out" | grep -q "could not push" \
   || bad "a failing push was hidden — expected a 'could not push' message"
 cleanup
 
+# --- 13. review-gate disposition lines are narrated into live.log -----------
+# The log-streaming spec requires runner orchestration lines (incl. a review-gate
+# status) to reach live.log, not only the terminal. The PASS disposition lines
+# must use narrate, not a stdout-only echo.
+new_gate_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+RALPH_ARGS="" run_gate >/dev/null 2>&1
+grep -q "ready for a human to merge" "$WS/.ralph/log/live.log" 2>/dev/null \
+  && ok "review-gate PASS disposition (parked) is captured in live.log" \
+  || bad "PASS disposition line missing from live.log (stdout-only echo?)"
+cleanup
+
+# auto-merge ON: the 'auto-merged' disposition must also reach live.log.
+new_gate_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+RALPH_ARGS="" run_gate RALPH_AUTO_MERGE=1 >/dev/null 2>&1
+grep -q "auto-merged PR" "$WS/.ralph/log/live.log" 2>/dev/null \
+  && ok "review-gate auto-merge disposition is captured in live.log" \
+  || bad "auto-merge disposition line missing from live.log (stdout-only echo?)"
+cleanup
+
 echo
 echo "review-gate tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

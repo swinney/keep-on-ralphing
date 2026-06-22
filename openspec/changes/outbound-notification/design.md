@@ -118,11 +118,16 @@ Rollback is unsetting `RALPH_NOTIFY_CMD` (notifications) and, if needed, reverti
 Reaching a machine requires the two-channel step: bump `.claude-plugin/plugin.json` and rebuild the base
 image.
 
-## Open Questions
+## Resolved Decisions
 
-- **Background vs synchronous notify** — leaning synchronous-under-`timeout` (D3); revisit only if a halt
-  notification's latency proves annoying.
-- **`RALPH_QUESTIONS` config** — ship the knob now or hardcode `docs/questions.md`? Leaning ship the knob
-  (cheap, consistent with every other path being configurable), default `docs/questions.md`.
-- **`ralph-status` surfacing** — whether the skill should report "notifications: configured" and a
-  blocked-question state; decide during tasks (doc tweak, not a spec requirement).
+- **Notify synchronously, under a short `timeout`** (confirms D3). The notifier runs inline at the halt,
+  status ignored; a hung notifier is killed by the `timeout` and the halt proceeds. No background/async
+  dispatch — a halt is not latency-sensitive, and synchronous is the simplest path that stays non-fatal.
+- **Ship the `RALPH_QUESTIONS` knob** (not hardcoded). A configurable path defaulting to
+  `docs/questions.md`, honouring `environment > ralph.conf > default` — cheap and consistent with every
+  other path being configurable. (Task 4.1.)
+- **`/ralph-status` surfaces blocked state** — yes, do it. The skill reports whether notifications are
+  configured and the blocked-question state, reading the runner-persisted signal in `RALPH_STATE_DIR`
+  (task 4.4), never re-deriving from `docs/questions.md`. The summon-a-human purpose of this change makes a
+  blocked state `/ralph-status` cannot show a half-finished signal; the persistence cost (one field in an
+  existing record) is small. (Tasks 4.4 + 6.4, now both committed rather than optional.)

@@ -33,12 +33,16 @@ the repo root, then read:
    short summary (the PR number from its header + the finding count). If it is
    absent/empty, the last review was clean. If the gate is off, omit this section.
 6. **Recent commits** — `git log --oneline -6`.
+7. **Live log** — if `<state_dir>/log/live.log` exists (the aggregate stream;
+   present when `RALPH_LIVE_LOG` is not `0`), note its path and that
+   `tail -f <state_dir>/log/live.log` follows the loop in realtime. Optionally show
+   its last 1–2 lines. If absent, omit this section.
 
 ## How to report
 
 Print a compact digest, in this order: running state → current turn → recent
 turns (newest last) → STATUS.md stop state → review-gate state (if on) → recent
-commits. Keep it scannable
+commits → live-log hint (if present). Keep it scannable
 (a few lines each). Don't editorialize; report the facts. If the state dir
 doesn't exist yet, say the loop has not run in this repo.
 

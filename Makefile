@@ -29,6 +29,6 @@ test:
 # after `build-base`. Asserts the runner's tools are on PATH inside $(BASE_IMAGE).
 smoke-base:
 	@$(RUNTIME) run --rm $(BASE_IMAGE) sh -c '\
-	  for t in gh git ralph.sh until_reset.py; do \
+	  for t in gh git ralph.sh until_reset.py ralph_prefix.py; do \
 	    command -v $$t >/dev/null 2>&1 || { echo "smoke-base FAIL: $$t missing from $(BASE_IMAGE)"; exit 1; }; \
-	  done; echo "smoke-base OK: gh=$$(gh --version | head -1), git, ralph.sh, until_reset.py present"'
+	  done; echo "smoke-base OK: gh=$$(gh --version | head -1), git, ralph.sh, until_reset.py, ralph_prefix.py present"'

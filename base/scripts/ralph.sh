@@ -95,6 +95,10 @@ limit_poll=${RALPH_LIMIT_POLL:-900}
 tasks_file=${RALPH_TASKS:-tasks.md}
 state_dir=${RALPH_STATE_DIR:-.ralph}
 poll_interval=${RALPH_POLL_INTERVAL:-30}
+# Aggregate log: a single append-only tail target (runner narration + agent
+# output, turn-prefixed) for an external aggregator. On by default; =0 reproduces
+# the pre-feature behaviour exactly. See the Vector recipe in docs/.
+live_log_enabled=${RALPH_LIVE_LOG:-1}
 
 if [ ! -f PROMPT.md ]; then
   echo "ralph: PROMPT.md missing in $(pwd) — refusing to start" >&2
@@ -125,11 +129,50 @@ fi
 mkdir -p "$state_dir/log"
 turn_file="$state_dir/turn"
 turn=$(cat "$turn_file" 2>/dev/null || echo 0)
+live_log="$state_dir/log/live.log"
+
+# The agent-output fan-out pipes through python3 + ralph_prefix.py. python3 is
+# OPTIONAL in this runner (emit_status no-ops without it; the preflight does not
+# require it), so don't let live logging turn a missing interpreter/helper into a
+# broken output pipe: if the prefixer can't start, the fan-out's sink closes and
+# tee takes SIGPIPE once the agent exceeds a pipe buffer — truncating turn-N.txt /
+# stdout and masking the agent's exit code with 141. Degrade gracefully instead.
+if [ "$live_log_enabled" = 1 ] &&
+  { ! command -v python3 >/dev/null 2>&1 || [ ! -f "$script_dir/ralph_prefix.py" ]; }; then
+  echo "ralph: RALPH_LIVE_LOG=1 but python3 or ralph_prefix.py is unavailable — disabling live.log for this run" >&2
+  live_log_enabled=0
+fi
+
+# Same failure, different cause: if the sink path is not appendable (a read-only
+# bind-mount, or a stale directory sitting at live.log), the fan-out's
+# `>> "$live_log"` redirect fails before the prefixer reads, closing the pipe and
+# triggering the same tee SIGPIPE / truncation. Preflight with a no-op append.
+if [ "$live_log_enabled" = 1 ] && ! (: >>"$live_log") 2>/dev/null; then
+  echo "ralph: RALPH_LIVE_LOG=1 but $live_log is not writable — disabling live.log for this run" >&2
+  live_log_enabled=0
+fi
 
 model_args=()
 [ -n "${RALPH_MODEL:-}" ] && model_args=(--model "$RALPH_MODEL")
 
 head_rev() { git rev-parse HEAD 2>/dev/null || echo none; }
+
+# Append one line to the aggregate live.log, turn-prefixed and timestamped to
+# match ralph_prefix.py's format. Single runner lines use this shell-side
+# formatter (no pipe); the high-volume agent output goes through ralph_prefix.py
+# in run_turn. No-op when RALPH_LIVE_LOG=0.
+_live_append() {
+  [ "${live_log_enabled:-1}" = 1 ] || return 0
+  printf '%s turn=%s | %s\n' "$(date -Is)" "${turn:-0}" "$*" >>"$live_log" 2>/dev/null || true
+}
+
+# Narrate one runner line: to stdout (the live terminal / `podman logs` view) AND
+# the aggregate live.log, so the loop's own orchestration story is part of the
+# single stream a tailer follows — not terminal-only as it was before.
+narrate() {
+  echo "$@"
+  _live_append "$@"
+}
 
 # The first unchecked tasks.md task (what the upcoming turn should pick up).
 first_task() {
@@ -264,7 +307,7 @@ run_review_gate() {
   if [ -z "${findings//[[:space:]]/}" ] && [ "$status" = success ]; then
     : >"$review_findings"
     review_rounds=0
-    echo "ralph: review-gate PASS on PR #$num (clean review, CI green)"
+    narrate "ralph: review-gate PASS on PR #$num (clean review, CI green)"
     if [ "${RALPH_AUTO_MERGE:-0}" = 1 ]; then
       merge_pr "$num" && echo "ralph: auto-merged PR #$num into $(base_branch)"
     else
@@ -284,7 +327,7 @@ run_review_gate() {
     fi
   } >"$review_findings"
   review_rounds=$((review_rounds + 1))
-  echo "ralph: review-gate found issues on PR #$num (round ${review_rounds}/${RALPH_REVIEW_MAX_ROUNDS:-3}) — wrote $review_findings"
+  narrate "ralph: review-gate found issues on PR #$num (round ${review_rounds}/${RALPH_REVIEW_MAX_ROUNDS:-3}) — wrote $review_findings"
 
   if [ "$review_rounds" -ge "${RALPH_REVIEW_MAX_ROUNDS:-3}" ]; then
     printf 'Loop halted: review gate still failing after %d rounds on PR #%s. Human review needed.\n' \
@@ -299,7 +342,7 @@ run_turn() {
   turn=$((turn + 1))
   echo "$turn" >"$turn_file"
   local log="$state_dir/log/turn-${turn}.txt"
-  local task started ended before after committed sha subject
+  local task started ended before after committed sha subject summary
   task=$(first_task)
   started=$(date -Is)
   before=$(head_rev)
@@ -308,14 +351,27 @@ run_turn() {
   RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="${RALPH_MODEL:-}" RJ_STATE="running" \
     RJ_STARTED="$started" emit_status current
 
-  echo "ralph: turn $turn ($started)${RALPH_MODEL:+ model=$RALPH_MODEL} timeout=${turn_timeout}s -> $log"
-  echo "ralph:   task -> ${task:-<none>}"
+  narrate "ralph: turn $turn ($started)${RALPH_MODEL:+ model=$RALPH_MODEL} timeout=${turn_timeout}s -> $log"
+  narrate "ralph:   task -> ${task:-<none>}"
   # stdbuf -oL line-buffers output so `tail -f` shows progress LIVE, not only
   # when the turn ends. timeout sends TERM at the cap, then KILL 30s later.
-  stdbuf -oL -eL timeout -k 30 "$turn_timeout" \
-    claude -p --dangerously-skip-permissions "${model_args[@]}" <PROMPT.md 2>&1 | tee "$log"
+  # When live logging is on, fan a turn-prefixed copy into live.log via process
+  # substitution — a fan-out, NOT a 3rd pipe stage — so a copy still reaches
+  # stdout (terminal / podman logs) and ${PIPESTATUS[0]} stays the agent's code.
+  if [ "${live_log_enabled:-1}" = 1 ]; then
+    stdbuf -oL -eL timeout -k 30 "$turn_timeout" \
+      claude -p --dangerously-skip-permissions "${model_args[@]}" <PROMPT.md 2>&1 \
+      | tee "$log" >(python3 "$script_dir/ralph_prefix.py" "$turn" >>"$live_log")
+  else
+    stdbuf -oL -eL timeout -k 30 "$turn_timeout" \
+      claude -p --dangerously-skip-permissions "${model_args[@]}" <PROMPT.md 2>&1 \
+      | tee "$log"
+  fi
   turn_ec=${PIPESTATUS[0]}
-  [ "$turn_ec" -eq 124 ] && echo "ralph: turn $turn TIMED OUT after ${turn_timeout}s" | tee -a "$log"
+  if [ "$turn_ec" -eq 124 ]; then
+    echo "ralph: turn $turn TIMED OUT after ${turn_timeout}s" | tee -a "$log"
+    _live_append "ralph: turn $turn TIMED OUT after ${turn_timeout}s"
+  fi
 
   after=$(head_rev)
   committed=0
@@ -337,22 +393,24 @@ run_turn() {
     RJ_COMMITTED="$committed" RJ_SHA="$sha" RJ_SUBJECT="$subject" emit_status current
 
   if [ "$committed" = 1 ]; then
-    echo "ralph: turn $turn exited $turn_ec ($ended) — committed $sha: $subject" | tee -a "$log"
+    summary="ralph: turn $turn exited $turn_ec ($ended) — committed $sha: $subject"
   else
-    echo "ralph: turn $turn exited $turn_ec ($ended) — no commit" | tee -a "$log"
+    summary="ralph: turn $turn exited $turn_ec ($ended) — no commit"
   fi
+  echo "$summary" | tee -a "$log"
+  _live_append "$summary"
 }
 
 trap 'echo; echo "ralph: caught SIGINT at turn $turn, exiting"; exit 130' INT
 
 if [ "$once" -eq 1 ]; then
-  echo "ralph: single turn (--once) starting from turn $turn"
+  narrate "ralph: single turn (--once) starting from turn $turn"
   run_turn
-  echo "ralph: --once complete — log at $state_dir/log/turn-${turn}.txt"
+  narrate "ralph: --once complete — log at $state_dir/log/turn-${turn}.txt"
   exit "$turn_ec"
 fi
 
-echo "ralph: starting at turn $turn ($(date -Is)) — timeout ${turn_timeout}s, max-stalls ${max_stalls}"
+narrate "ralph: starting at turn $turn ($(date -Is)) — timeout ${turn_timeout}s, max-stalls ${max_stalls}"
 
 # Outer-loop review gate preflight (opt-in). All remote work is the runner's, so
 # fail fast if its preconditions are unmet rather than silently skipping the gate.
@@ -377,7 +435,7 @@ if [ "${RALPH_REVIEW_GATE:-1}" = 1 ]; then
     echo "ralph: RALPH_REVIEWER='$RALPH_REVIEWER' is not executable — refusing to start" >&2
     exit 1
   fi
-  echo "ralph: review gate ON — branch $(working_branch) -> base $(base_branch); auto-merge ${RALPH_AUTO_MERGE:-0}; max-rounds ${RALPH_REVIEW_MAX_ROUNDS:-3}"
+  narrate "ralph: review gate ON — branch $(working_branch) -> base $(base_branch); auto-merge ${RALPH_AUTO_MERGE:-0}; max-rounds ${RALPH_REVIEW_MAX_ROUNDS:-3}"
 fi
 
 # STATUS.md is BOTH the loop's stop-signal and the human cold-start breadcrumb,
@@ -401,7 +459,7 @@ while true; do
     grep -qiE "hit your (session|weekly|opus|usage) limit" "$last_log" 2>/dev/null; then
     reset=$(grep -oiE "resets [^.]*" "$last_log" | head -1)
     wait_s=$(python3 "$script_dir/until_reset.py" "$reset" 2>/dev/null || echo "$limit_poll")
-    echo "ralph: usage limit hit at turn $turn (${reset:-reset time unknown}) — pausing ${wait_s}s, then retrying (not a stall)"
+    narrate "ralph: usage limit hit at turn $turn (${reset:-reset time unknown}) — pausing ${wait_s}s, then retrying (not a stall)"
     sleep "$wait_s"
     turn=$((turn - 1)) # replay this turn number — the task was not completed
     echo "$turn" >"$turn_file"
@@ -415,7 +473,7 @@ while true; do
   # content (a blank/whitespace-only write must still NOT trip a stop).
   status_now="$(cat STATUS.md 2>/dev/null || true)"
   if [ -n "${status_now//[[:space:]]/}" ] && [ "$status_now" != "$status_start" ]; then
-    echo "ralph: STATUS.md updated with a stop reason at turn $turn — stopping"
+    narrate "ralph: STATUS.md updated with a stop reason at turn $turn — stopping"
     echo "--- STATUS.md ---"
     cat STATUS.md
     exit 0
@@ -427,7 +485,7 @@ while true; do
   if [ "${RALPH_REVIEW_GATE:-1}" = 1 ] && [ "$before" != "$after" ]; then
     run_review_gate
     if [ "$REVIEW_GATE_HALT" = 1 ]; then
-      echo "ralph: review gate exhausted its rounds at turn $turn — wrote STATUS.md, stopping"
+      narrate "ralph: review gate exhausted its rounds at turn $turn — wrote STATUS.md, stopping"
       echo "--- STATUS.md ---"
       cat STATUS.md
       exit 1
@@ -436,11 +494,11 @@ while true; do
 
   if [ "$before" = "$after" ]; then
     stalls=$((stalls + 1))
-    echo "ralph: turn $turn produced NO commit (stall ${stalls}/${max_stalls}, exit ${turn_ec})"
+    narrate "ralph: turn $turn produced NO commit (stall ${stalls}/${max_stalls}, exit ${turn_ec})"
     if [ "$stalls" -ge "$max_stalls" ]; then
       printf 'Loop halted: %d consecutive turns made no commit (last exit %d — hung/timed-out or stuck-on-red). Human review needed.\n' \
         "$stalls" "$turn_ec" >STATUS.md
-      echo "ralph: ${stalls} consecutive no-progress turns — wrote STATUS.md, stopping"
+      narrate "ralph: ${stalls} consecutive no-progress turns — wrote STATUS.md, stopping"
       exit 1
     fi
   else

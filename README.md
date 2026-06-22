@@ -119,6 +119,15 @@ cache is pruned after an update), never a frozen cache path.
 Everything project-specific lives in one `ralph.conf` (env vars override it).
 See `templates/ralph.conf.example` for every key. `/ralph-init` fills it for you.
 
+## Watching a loop in realtime
+
+The loop is a **log source**: it writes `.ralph/status.jsonl` (structured, one record per turn) and,
+with `RALPH_LIVE_LOG=1` (default), an append-only `.ralph/log/live.log` that interleaves runner
+narration with agent output, every line turn-prefixed — one stable `tail -f` target. Point your own
+aggregator at the bind-mounted files; the kit ships no dashboard and opens no port. See
+[`docs/recipes/vector-console.md`](docs/recipes/vector-console.md) for a zero-backend Vector recipe
+(console sink + `vector top`) that also centralizes several loops via one glob.
+
 ## Tests
 
 ```sh

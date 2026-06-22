@@ -46,6 +46,17 @@ RALPH_LIMIT_POLL="900"
 # Inter-turn sleep in loop mode, in seconds. Default: 30
 RALPH_POLL_INTERVAL="30"
 
+# --- aggregate log (for an external log aggregator) --------------------------
+
+# Write a single append-only $RALPH_STATE_DIR/log/live.log that interleaves the
+# runner's narration with each turn's agent output, every line turn-prefixed and
+# ISO-timestamped — one stable tail target for an aggregator (Vector, Logstash,
+# …) or a bare `tail -f`. The per-turn turn-<n>.txt files and status.jsonl are
+# unaffected. 1 = on, 0 = reproduce the pre-feature behaviour exactly. The kit
+# ships NO aggregator; see docs/recipes/vector-console.md for a zero-backend
+# realtime view. Default: 1 (on)
+RALPH_LIVE_LOG="1"
+
 # --- outer-loop review gate (ON by default — this loop is GitHub-dependent) --
 #
 # After a turn commits, the loop (the RUNNER, never the agent) pushes the branch,

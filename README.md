@@ -114,6 +114,13 @@ The build material ships **inside the plugin** (`base/` + the `Makefile`), so
 installed plugin — resolve `$CLAUDE_PLUGIN_ROOT` at build time (the versioned plugin
 cache is pruned after an update), never a frozen cache path.
 
+**Freshness.** The `:v1` tag is content-mutable, so the build bakes a content-hash
+**provenance stamp** into the image. You don't have to track rebuilds by hand:
+`/ralph-build-base` rebuilds only when the image is actually stale (and skips otherwise),
+`/ralph-status` flags a drifted base, the runner prints its baked stamp at startup, and
+`make loop` refuses a loop image built on a superseded base (run `make build`). Freshness
+keys on the content hash (plus the host UID/GID), not the plugin version.
+
 ## Configuration
 
 Everything project-specific lives in one `ralph.conf` (env vars override it).

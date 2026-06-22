@@ -30,6 +30,7 @@ bash base/tests/test_gate_hook.sh                                   # gate-hook 
 bash base/tests/test_review_gate.sh                                 # outer-loop review gate only
 bash base/tests/test_notify.sh                                      # outbound notification + blocked-question stop only
 bash base/tests/test_conformance.sh                                 # structural spec-conformance checks (scans source, no loop)
+bash base/tests/test_base_freshness.sh                              # base-image freshness decision (stamp + UID/GID), stubbed runtime
 ```
 
 The test suite is self-contained — it needs only bash, git, python3 (+ pytest), and
@@ -116,6 +117,20 @@ nothing forces them to move together. Skipping either half ships a silent partia
 - **Base image** (`base/`) — versioned by its tag (`ralph-base:v1`). Distributed by local
   `make build-base`, **not** the marketplace; a plugin update can't trigger it. Runner
   (`base/scripts/`) changes reach a machine only after a rebuild there.
+
+**Base-image freshness (the "merged ≠ live" guard).** The `:v1` tag is content-mutable, so the
+build bakes a **provenance stamp** — a content hash of the runner sources + `Containerfile`, the ONE
+definition in `base/scripts/base_version.sh` — as a `LABEL` and `/etc/ralph-base.version`, plus the
+host `org.ralph.user-uid`/`-gid` labels. `base/scripts/base_freshness.sh` is the ONE freshness rule
+(current ⇔ stamp matches the bundled `base/` AND baked UID/GID match the host): `/ralph-build-base`
+calls it to skip a needless rebuild, `/ralph-status` to flag drift, the runner narrates its stamp at
+startup, and the consumer `Makefile` `loop` preflight (`check-base`) refuses a loop image built on a
+superseded base. Freshness keys on the **content hash, not the plugin version** (the channels are
+unlinked, so a hash is self-truthing). When editing the stamp/freshness logic, keep it single-sourced
+in those two helpers — `base/tests/test_conformance.sh` enforces that the hash is not re-implemented.
+A `SessionStart` hook that auto-rebuilds on drift is the **future** proactive trigger (so the operator
+need not remember even `/ralph-build-base`); it is explicitly NOT built — today the trigger is the
+idempotent skill plus the surfacing touchpoints above.
 
 **Checklist for any change that alters harness behaviour:**
 

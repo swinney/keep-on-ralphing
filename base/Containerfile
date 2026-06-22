@@ -56,6 +56,14 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
 COPY scripts/ralph.sh scripts/until_reset.py scripts/ralph_prefix.py /usr/local/bin/
 RUN chmod +x /usr/local/bin/ralph.sh /usr/local/bin/until_reset.py /usr/local/bin/ralph_prefix.py
 
+# Provenance stamp: the content hash of the runner sources + this Containerfile,
+# computed by base/scripts/base_version.sh and passed via --build-arg. Baked as a
+# world-readable file (read by the in-container runner at startup) — and as labels
+# below (read host-side by /ralph-build-base and /ralph-status to detect drift
+# without starting a container). Default "unknown" so a stampless build still works.
+ARG RALPH_BASE_VERSION=unknown
+RUN printf '%s\n' "$RALPH_BASE_VERSION" >/etc/ralph-base.version && chmod a+r /etc/ralph-base.version
+
 # Non-root user whose UID/GID match the invoking host user (override with
 # --build-arg). With rootless Podman this makes files written under /workspace
 # come out owned by you on the host.
@@ -63,6 +71,16 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 RUN groupadd -g ${USER_GID} claude \
     && useradd -m -u ${USER_UID} -g ${USER_GID} -s /bin/bash claude
+
+# Freshness provenance, host-readable via `podman image inspect` (no container
+# start). The base-version is the content stamp; the uid/gid are the baked
+# ownership inputs — the freshness check requires BOTH the stamp AND the UID/GID
+# to match before declaring the image current (a stamp match alone would skip a
+# rebuild for an image built for a different host UID/GID, breaking /workspace
+# ownership).
+LABEL org.ralph.base-version="$RALPH_BASE_VERSION" \
+      org.ralph.user-uid="$USER_UID" \
+      org.ralph.user-gid="$USER_GID"
 
 # Put the user's pip --user bin dir on PATH for EVERY exec context, not just
 # login shells. A consumer's Containerfile pip-installs its gate tools (ruff,

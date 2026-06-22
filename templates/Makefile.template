@@ -34,7 +34,7 @@ RUN_FLAGS := \
   -v $(WORKSPACE):/workspace \
   -v $(CLAUDE_DIR):/home/claude/.claude
 
-.PHONY: help hooks build login loop loop-once shell clean
+.PHONY: help hooks build check-base login loop loop-once shell clean
 
 help:
 	@echo "Targets:"
@@ -60,15 +60,35 @@ build: hooks
 	  --build-arg USER_GID=$$(id -g) \
 	  -t $(IMAGE) -f Containerfile .
 
+# Refuse to run a loop image built on a SUPERSEDED base. $(IMAGE) inherits
+# $(BASE_IMAGE)'s org.ralph.* LABELs; if the base-version OR the baked UID/GID
+# differ from the base image now on the machine, the base was rebuilt without
+# `make build` here — so the loop would run a stale runner or wrong-owner image.
+# Detect + instruct only (rebuilding the BASE needs the plugin; that is
+# /ralph-build-base's job). Skips silently if either image is unstamped (legacy)
+# or the runtime is absent.
+# NOTE: the `{{ index ... }}` below are Go/podman template literals, NOT ralph-init
+# {{PLACEHOLDER}} tokens — do not substitute them.
+check-base:
+	@command -v $(RUNTIME) >/dev/null 2>&1 || exit 0; \
+	  fmt='{{ index .Config.Labels "org.ralph.base-version" }}:{{ index .Config.Labels "org.ralph.user-uid" }}:{{ index .Config.Labels "org.ralph.user-gid" }}'; \
+	  img=$$($(RUNTIME) image inspect $(IMAGE) --format "$$fmt" 2>/dev/null); \
+	  base=$$($(RUNTIME) image inspect $(BASE_IMAGE) --format "$$fmt" 2>/dev/null); \
+	  if [ -n "$${img%%:*}" ] && [ -n "$${base%%:*}" ] && [ "$$img" != "$$base" ]; then \
+	    echo "ERROR: $(IMAGE) was built on a stale/mismatched $(BASE_IMAGE) ($$img != $$base)."; \
+	    echo "       Run 'make build' to rebuild it on the current base before looping."; \
+	    exit 1; \
+	  fi
+
 login:
 	@mkdir -p $(CLAUDE_DIR)
 	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE)-login $(IMAGE) claude login
 
-loop: hooks
+loop: hooks check-base
 	@mkdir -p $(CLAUDE_DIR)
 	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE) $(IMAGE) ralph.sh
 
-loop-once: hooks
+loop-once: hooks check-base
 	@mkdir -p $(CLAUDE_DIR)
 	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE)-once $(IMAGE) ralph.sh --once
 

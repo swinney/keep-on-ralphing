@@ -219,6 +219,33 @@ sys.exit(0 if rec["model"] == sys.argv[2] else 1)
 PY
 cleanup
 
+# --- 11. startup narrates the baked base-version (provenance stamp) ----------
+new_ws
+printf 'deadbeefstamp\n' >"$WS/fake-base-version"
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm t1
+S
+out=$( cd "$WS" && PATH="$STUB/bin:$PATH" HOME="$HOME_DIR" \
+  RALPH_WORKSPACE="$WS" RALPH_STATE_DIR=.ralph RALPH_REVIEW_GATE=0 \
+  RALPH_BASE_VERSION_FILE="$WS/fake-base-version" bash "$RALPH" --once 2>&1 )
+printf '%s' "$out" | grep -q "base-version deadbeefstamp" \
+  && ok "startup narrates the baked base-version" \
+  || bad "base-version not narrated (got: $(printf '%s' "$out" | grep -i base-version))"
+cleanup
+
+# --- 12. absent base-version file → narrates 'unknown' ----------------------
+new_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm t1
+S
+out=$( cd "$WS" && PATH="$STUB/bin:$PATH" HOME="$HOME_DIR" \
+  RALPH_WORKSPACE="$WS" RALPH_STATE_DIR=.ralph RALPH_REVIEW_GATE=0 \
+  RALPH_BASE_VERSION_FILE="$WS/does-not-exist" bash "$RALPH" --once 2>&1 )
+printf '%s' "$out" | grep -q "base-version unknown" \
+  && ok "absent base-version file narrates 'unknown'" \
+  || bad "absent base-version did not narrate 'unknown'"
+cleanup
+
 echo
 echo "ralph.sh runner tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

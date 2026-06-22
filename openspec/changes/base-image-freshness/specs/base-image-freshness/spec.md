@@ -66,9 +66,9 @@ image rather than running on the stale base. Because a consumer-side command can
 `base/`, this path SHALL detect-and-instruct only; it SHALL NOT attempt to rebuild the base image itself.
 
 #### Scenario: A loop image built on a superseded base is flagged at the point of use
-- **WHEN** `make loop` (or `loop-once`) is invoked and the loop image's recorded base stamp differs from the `ralph-base:v1` currently on the machine
-- **THEN** the preflight reports the loop image is built on a stale base and instructs the operator to rebuild it (`make build`)
+- **WHEN** `make loop` (or `loop-once`) is invoked and the loop image's inherited base stamp OR baked UID/GID differ from the `ralph-base:v1` currently on the machine
+- **THEN** the preflight reports the loop image is built on a stale/mismatched base and instructs the operator to rebuild it (`make build`)
 
 #### Scenario: A current base proceeds without friction
-- **WHEN** the loop image's base stamp matches the `ralph-base:v1` on the machine
+- **WHEN** the loop image's base stamp AND UID/GID match the `ralph-base:v1` on the machine
 - **THEN** the preflight passes and the loop runs normally

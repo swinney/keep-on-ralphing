@@ -19,6 +19,7 @@ build-base:
 	$(RUNTIME) build \
 	  --build-arg USER_UID=$$(id -u) \
 	  --build-arg USER_GID=$$(id -g) \
+	  --build-arg RALPH_BASE_VERSION=$$(bash base/scripts/base_version.sh) \
 	  -t $(BASE_IMAGE) -f base/Containerfile base
 
 test:
@@ -32,3 +33,11 @@ smoke-base:
 	  for t in gh git ralph.sh until_reset.py ralph_prefix.py; do \
 	    command -v $$t >/dev/null 2>&1 || { echo "smoke-base FAIL: $$t missing from $(BASE_IMAGE)"; exit 1; }; \
 	  done; echo "smoke-base OK: gh=$$(gh --version | head -1), git, ralph.sh, until_reset.py, ralph_prefix.py present"'
+	@# Provenance stamp: the baked file + LABEL must be present and equal to the source hash.
+	@want=$$(bash base/scripts/base_version.sh); \
+	  [ -n "$$want" ] || { echo "smoke-base FAIL: could not compute source stamp"; exit 1; }; \
+	  baked=$$($(RUNTIME) run --rm $(BASE_IMAGE) cat /etc/ralph-base.version 2>/dev/null | tr -d '[:space:]'); \
+	  label=$$($(RUNTIME) image inspect $(BASE_IMAGE) --format '{{ index .Config.Labels "org.ralph.base-version" }}' 2>/dev/null); \
+	  [ "$$baked" = "$$want" ] && [ "$$label" = "$$want" ] \
+	    && echo "smoke-base OK: provenance stamp baked (file+label = $$want)" \
+	    || { echo "smoke-base FAIL: stamp mismatch (want=$$want file=$$baked label=$$label) — rebuild"; exit 1; }

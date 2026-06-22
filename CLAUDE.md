@@ -183,15 +183,19 @@ both required in one release.
   trailer, and `⛔ MILESTONE GATE` — see `first_task_class()`. bash 3.2-safe (indirect `${!var}` +
   `tr`, no associative arrays; precedence rides the existing env-snapshot). Runner change →
   two-channel release.
-- **One-orchestrator workspace lock.** At startup the runner takes a PID lock at
-  `$RALPH_STATE_DIR/lock`: refuses to start if a LIVE PID owns it, reclaims it when the recorded PID
-  is dead (a crashed loop never blocks forever). Released via `trap release_lock EXIT` — which also
-  fires when the SIGINT handler calls `exit`, so Ctrl-C releases it too; `release_lock` removes the
-  file only if `$$` still owns it (a refused second start never steals the incumbent's lock).
-  PID-based not `flock` for portability; guards one workspace within one host/PID namespace (the
-  actual field failure, §5.15). `/ralph-status` reports lock presence but must NOT `kill -0` the PID
-  (it is the loop's container-namespace value) — liveness is the container-running check. Runner
-  change → two-channel release.
+- **One-orchestrator workspace lock.** At startup the runner takes a **`flock`** on
+  `$RALPH_STATE_DIR/lock` (held on fd 9 for the run): refuses to start if another loop holds it; the
+  kernel auto-releases it when the holder dies, so a leftover lock self-heals. `flock` (not a PID
+  file) is load-bearing: the runner is **PID 1** in its container, so a `podman stop`/SIGKILL/OOM
+  (the EXIT trap never runs) would leave a PID file holding "1", and the next container's own live
+  PID 1 would read it as live and refuse FOREVER — cross-namespace liveness is unknowable from a PID.
+  flock keys on the shared bind-mounted inode (atomic + namespace-safe). See design.md D4 (a reversal
+  made during PR review). Degrades to a warned no-lock where flock is absent (live.log idiom). The
+  EXIT trap also fires when the SIGINT handler calls `exit` (and `release_lock` only acts when it
+  actually holds the lock — a refused start never rm's the incumbent's file). `/ralph-status` reports
+  lock presence but must NOT `kill -0` the file's PID (informational only; the loop's
+  container-namespace value) — liveness is the container-running check. Runner change → two-channel
+  release.
 - **Aggregate log for an external aggregator (`RALPH_LIVE_LOG`, ON by default).** The runner also
   writes `log/live.log` — one append-only tail target interleaving runner narration (`narrate()`) with
   agent output, each line `turn=<n>`-prefixed + ISO-timestamped. Agent output is fanned in via a `tee`

@@ -51,12 +51,24 @@ Because the gate + commit-as-truth are untouched, a misclassified task can at wo
 ship a bad commit. The dial therefore needs no correctness safeguards of its own — the convergence machine
 already is the safeguard. This is asserted in the spec and verified by leaning on existing stall behavior.
 
-### D4 — One-orchestrator lock: PID lockfile in RALPH_STATE_DIR with stale detection
-At startup the runner writes `$RALPH_STATE_DIR/lock` containing its PID; if a live PID already owns it, refuse
-to start; if the recorded PID is dead, reclaim. Released on normal exit and via the existing SIGINT trap.
-*Why a lock over nothing:* competing loops corrupting shared state was a real field-log failure (§5.15); the
-lock is cheap, enforceable, and bash 3.2-safe. *Why PID over flock:* `flock` isn't universally present and the
-runner targets portability; a PID file with a liveness check is the lowest-common-denominator.
+### D4 — One-orchestrator lock: flock on a lockfile in RALPH_STATE_DIR
+At startup the runner takes a `flock(1)` on `$RALPH_STATE_DIR/lock` (held open on fd 9 for the run); if another
+process holds it, refuse to start; the kernel drops it when the holder dies, so a leftover lock self-heals.
+Released on normal exit and via the existing SIGINT trap (and by the kernel regardless). *Why a lock over
+nothing:* competing loops corrupting shared state was a real field-log failure (§5.15); the lock is cheap,
+enforceable, and bash 3.2-safe (fixed fd, not the 4.1 `{var}>` form).
+
+*Why flock, not a PID file (a reversal made during PR review).* The first cut wrote the runner's PID and used
+`kill -0` for liveness, on the rationale that flock "isn't universally present." Review (Codex P1) showed that
+premise is fatal to the actual workflow: the runner is **PID 1** inside its podman container, so a container
+killed before its EXIT trap runs (`podman stop`/SIGKILL/OOM) leaves a lock holding "1" — and the next
+container's own live PID 1 makes `kill -0 1` read the stale lock as *live*, refusing forever (a stale lock that
+never self-heals, violating "reclaimed rather than blocking forever"). Cross-namespace liveness is unknowable
+from a PID alone, and the runner cannot introspect the container runtime. flock keys on the shared bind-mounted
+inode instead: atomic acquisition (closing the original check-then-write TOCTOU too) and kernel auto-release on
+death **across PID namespaces**. flock ships in the base image (util-linux) and the kit's scope is Linux+podman;
+where flock is genuinely absent the runner degrades to a warned no-lock (the live.log idiom) rather than ship a
+PID check known-broken in containers.
 
 ### D5 — Operator discipline encoded for two audiences
 The in-container agent is itself an automated operator (it reproduces failures, theorizes about CI/the

@@ -164,12 +164,14 @@ task can at worst stall (caught by the stall detector), never ship a bad commit.
 
 ## One orchestrator per workspace
 
-The runner takes a PID lock at `$RALPH_STATE_DIR/lock` on startup and **refuses to
+The runner takes a `flock` on `$RALPH_STATE_DIR/lock` on startup and **refuses to
 start a second concurrent loop on the same workspace** — competing loops corrupt
-shared state (`.ralph/`, the branch). A lock left by a dead process is detected as
-stale and reclaimed (so a crashed loop never blocks forever); the lock releases on
-exit and on Ctrl-C. This guards one workspace within one host — the actual failure
-it targets.
+shared state (`.ralph/`, the branch). Because the loop runs as PID 1 in its
+container, the lock uses `flock` (not a PID file): the kernel releases it when the
+holder dies — including a `podman stop`/SIGKILL/OOM that skips the exit handler — so
+a leftover lock self-heals and the next start reacquires it cleanly, rather than a
+stale "PID 1" blocking the loop forever. (Where `flock` is unavailable, outside the
+supported Linux+podman scope, the runner warns and runs without the lock.)
 
 ## Autonomy is a gated opt-in; velocity targets serial latency
 

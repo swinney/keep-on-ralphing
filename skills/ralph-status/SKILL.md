@@ -25,14 +25,16 @@ the repo root, then read:
    `base/` and the host UID/GID) or `stale: <reason>` (rebuild with
    `/ralph-build-base`). Read-only — it never rebuilds. If the helper/runtime is
    unavailable, report "base-image freshness: unknown" and move on; never fail.
-1c. **Workspace lock** — read `<state_dir>/lock` (the one-orchestrator PID lock).
+1c. **Workspace lock** — read `<state_dir>/lock` (the one-orchestrator `flock`).
    If absent, report "lock: none (no loop holds this workspace)". If present, show
-   the recorded PID and cross-reference the container-running check above for
-   liveness: a present lock **with** a running loop container = the loop holds it;
-   a present lock **without** a running container = a likely **stale lock** from a
-   crashed loop (the next `ralph.sh` reclaims it automatically — flag it, don't act).
-   Do NOT `kill -0` the PID from here: it is the loop's own PID-namespace value (the
-   loop runs in the container), so a host liveness check is meaningless. Read-only.
+   the recorded PID (informational only) and cross-reference the container-running
+   check above: a present lock file **with** a running loop container = the loop
+   holds it; a present lock file **without** a running container = a likely **stale
+   leftover** from a killed loop (the `flock` is already released by the kernel, so
+   the next `ralph.sh` reacquires automatically — flag it, don't act). Do NOT
+   `kill -0` the PID and do NOT treat the file's mere presence as "held": the PID is
+   the loop's own container-namespace value and `flock`, not the file, is the
+   authority — a host-side liveness check is meaningless. Read-only.
 2. **Current turn** — `<state_dir>/current.json` (the heartbeat: turn, task,
    model, state, started). If absent, "no heartbeat yet".
 3. **Recent turns** — the last ~10 lines of `<state_dir>/status.jsonl`; each line

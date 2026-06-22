@@ -534,39 +534,54 @@ run_turn() {
 
 # --- one-orchestrator workspace lock ----------------------------------------
 # Competing loops on the same workspace corrupt shared state (.ralph/, the branch);
-# §5.15 of the field log paid for that. Take a PID lock at $state_dir/lock at
-# startup: refuse to start if a LIVE process already owns it; reclaim it when the
-# recorded PID is dead, so a crashed loop never blocks forever. PID-based (not
-# flock) for portability — flock is not universally present and the runner targets
-# bare/old runtimes; the guard is one workspace within one host/PID namespace,
-# which is the actual failure it targets. Released via the EXIT trap below — which
-# also fires when the SIGINT handler calls `exit`, so Ctrl-C releases it too.
+# §5.15 of the field log paid for that. Guard it with flock(1) on $state_dir/lock —
+# a kernel lock on the bind-mounted inode. Two properties make flock the right tool
+# where a bare PID file is NOT:
+#   * Atomic acquisition — no check-then-write race between two simultaneous starts.
+#   * Auto-release on process death ACROSS PID namespaces. The runner is PID 1 in its
+#     own container, so when a loop container is `podman stop`ped / SIGKILLed / OOM-
+#     killed (the EXIT trap never runs) a PID file would be left holding "1" — and the
+#     NEXT container's own PID 1 is alive, so a PID liveness check would read the
+#     stale lock as live and refuse FOREVER. flock keys on the shared inode, not a
+#     namespace-local PID, so the kernel drops it when the fd closes and the next
+#     container reacquires cleanly. (This reverses the original PID design — see
+#     design.md D4 — because cross-namespace liveness is unknowable from a PID alone.)
+# fd 9 is held open for the whole run (bash 3.2-safe fixed fd, not the 4.1 {var}
+# form). The file content is our PID — informational for /ralph-status only; flock,
+# not the content, is the authority. If flock is unavailable (outside the supported
+# Linux+podman scope), degrade to a warned no-lock rather than ship a PID check that
+# is known-broken in containers — the same graceful-degradation idiom as live.log.
+# Released via the EXIT trap below — which also fires when the SIGINT handler calls
+# `exit`, so Ctrl-C releases it too (and flock auto-releases regardless).
 lock_file="$state_dir/lock"
+lock_held=0
 acquire_lock() {
-  if [ -f "$lock_file" ]; then
-    local owner
-    owner=$(tr -d '[:space:]' <"$lock_file" 2>/dev/null)
-    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-      echo "ralph: another loop (PID $owner) holds the workspace lock $lock_file — refusing to start" >&2
-      exit 1
-    fi
-    narrate "ralph: reclaiming stale workspace lock $lock_file (owner PID ${owner:-?} not alive)"
-  fi
-  # Fail CLOSED: a lock is a mutual-exclusion guard, so if we cannot record our PID
-  # (the path is a directory, or an unwritable/unreadable lock another user owns),
-  # refuse rather than silently run lock-less and defeat the guard.
-  if ! echo "$$" >"$lock_file" 2>/dev/null; then
-    echo "ralph: cannot write workspace lock $lock_file — refusing to start" >&2
+  command -v flock >/dev/null 2>&1 || {
+    echo "ralph: flock not available — running WITHOUT a workspace lock (concurrent-loop protection off)" >&2
+    return 0
+  }
+  # Open the lock file on fd 9; a path that is a directory or unwritable fails here.
+  exec 9>"$lock_file" || {
+    echo "ralph: cannot open workspace lock $lock_file — refusing to start" >&2
+    exit 1
+  }
+  if ! flock -n 9; then
+    echo "ralph: another loop holds the workspace lock $lock_file — refusing to start" >&2
     exit 1
   fi
+  lock_held=1
+  # Record our PID for humans / ralph-status (informational; flock is the authority).
+  printf '%s\n' "$$" >&9 2>/dev/null || true
 }
-# Release only if we still own it — never steal a different live owner's lock (so a
-# refused second start leaves the incumbent's lock intact).
+# Release only if we actually hold it: drop the flock (close fd 9) and remove the
+# file. A refused start (another loop holds it, lock_held=0) must NOT rm the file or
+# it would orphan the incumbent's lock. flock also auto-releases on process exit, so
+# this is the tidy path, not the only one.
 release_lock() {
-  [ -f "$lock_file" ] || return 0
-  local owner
-  owner=$(tr -d '[:space:]' <"$lock_file" 2>/dev/null)
-  [ "$owner" = "$$" ] && rm -f "$lock_file"
+  [ "$lock_held" = 1 ] || return 0
+  rm -f "$lock_file" 2>/dev/null || true
+  exec 9>&- 2>/dev/null || true
+  lock_held=0
   return 0
 }
 acquire_lock

@@ -29,6 +29,7 @@ bash base/tests/test_ralph_runner.sh                                # runner sca
 bash base/tests/test_gate_hook.sh                                   # gate-hook enforcement only
 bash base/tests/test_review_gate.sh                                 # outer-loop review gate only
 bash base/tests/test_notify.sh                                      # outbound notification + blocked-question stop only
+bash base/tests/test_conformance.sh                                 # structural spec-conformance checks (scans source, no loop)
 ```
 
 The test suite is self-contained — it needs only bash, git, python3 (+ pytest), and
@@ -231,6 +232,27 @@ both required in one release.
   and targets Python 3.7+ (`datetime.UTC` is 3.11+). These look like mistakes but are
   intentional — see the "drift note" comment in `until_reset.py`. The base image runs
   3.12, but the runner is kept portable on purpose.
+
+### Spec-conformance: catch incumbent drift (universal requirements)
+
+A spec requirement with **universal scope** (every / all / always / never / SHALL-for-each)
+governs a *class* of code sites — broader than the diff that introduces it. When you add or
+expand such a requirement, **diff-scoped review (human + Copilot/Codex) and behavioral tests
+will not catch pre-existing ("incumbent") sites that now violate it** — the gap lives in the
+spec↔implementation seam, in code no diff touches.
+
+- **Incumbent-impact rule (authoring):** a change that adds/modifies a universal requirement
+  MUST enumerate the pre-existing governed sites and confirm or sweep them. State this in the
+  proposal so a reviewer can check incumbent compliance without re-deriving the set.
+- **Executable enforcement (`base/tests/test_conformance.sh`):** the *syntactically* checkable
+  universals are pinned by whole-tree structural checks that scan the source (no loop) and fail
+  on ANY violating site — currently complete `live.log` narration, single-source gate command,
+  and `example/`⇔`templates/` key parity. Add a check here when a new universal is greppable.
+- **Future path (M2, not built):** the *semantic* universals a grep can't encode (e.g. the
+  notify "summon-a-human" scope) are caught only by the incumbent-impact rule today; the
+  whole-tree conformance **audit** (run as a gate when `openspec/specs/**` changes) is the
+  documented next step, and a candidate *product* capability — a conformance review distinct
+  from the diff-scoped review gate, which ships the same blind spot to consumers.
 
 ## The PROMPT.md contract (templates/PROMPT.md.template)
 

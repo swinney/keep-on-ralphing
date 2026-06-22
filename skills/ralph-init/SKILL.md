@@ -195,10 +195,13 @@ must not be committed.
 - Print a **GitHub readiness** report — the review gate is ON by default, so the
   loop will REFUSE to start until these are met. Check and mark each
   present/blocked: a git remote (`git remote`), an authenticated `gh` (`gh auth
-  status`), and a non-base feature branch. For any that are blocked, give the
-  user the exact fix (`git remote add origin <url>`, `gh auth login`, check out a
-  feature branch). If they instead want an offline loop with no review, the
-  opt-out is `RALPH_REVIEW_GATE=0` in `ralph.conf`.
+  status`), a **derivable `GH_TOKEN`** (`gh auth token` returns a value, and the
+  generated `Makefile` forwards it — the in-container runner needs the token, not
+  just host login; see §3c), and a non-base feature branch. For any that are
+  blocked, give the user the exact fix (`git remote add origin <url>`, `gh auth
+  login`, confirm `gh auth token` returns a value / the `Makefile` forwards
+  `GH_TOKEN`, check out a feature branch). If they instead want an offline loop
+  with no review, the opt-out is `RALPH_REVIEW_GATE=0` in `ralph.conf`.
 - Tell the user the next steps explicitly:
   1. Build the base image `ralph-base:v1` from the plugin's **bundled** `base/` —
      no clone needed: `make -C "$CLAUDE_PLUGIN_ROOT" build-base`. The plugin ships

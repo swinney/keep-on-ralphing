@@ -39,5 +39,9 @@ echo "== outbound notification tests =="
 bash "$here/test_notify.sh" || rc=1
 
 echo
+echo "== structural conformance tests =="
+bash "$here/test_conformance.sh" || rc=1
+
+echo
 [ "$rc" -eq 0 ] && echo "ALL KIT TESTS PASSED" || echo "KIT TESTS FAILED"
 exit "$rc"

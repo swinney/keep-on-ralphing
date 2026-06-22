@@ -483,7 +483,7 @@ run_turn() {
   _live_append "$summary"
 }
 
-trap 'echo; echo "ralph: caught SIGINT at turn $turn, exiting"; exit 130' INT
+trap 'echo; _sig="ralph: caught SIGINT at turn $turn, exiting"; echo "$_sig"; _live_append "$_sig"; exit 130' INT
 
 if [ "$once" -eq 1 ]; then
   narrate "ralph: single turn (--once) starting from turn $turn"
@@ -566,6 +566,7 @@ while true; do
     narrate "ralph: STATUS.md updated with a stop reason at turn $turn — stopping"
     echo "--- STATUS.md ---"
     cat STATUS.md
+    _live_append "ralph: stop reason: $(printf '%s' "$status_now" | oneline)"
     notify_human stop "$(printf '%s' "$status_now" | oneline)"
     exit 0
   fi
@@ -589,6 +590,7 @@ while true; do
       narrate "ralph: blocked on a question in $questions_file at turn $turn — stopping (not a stall)"
       echo "--- $questions_file ---"
       cat "$questions_file"
+      _live_append "ralph: blocked question: $q_reason"
       notify_human blocked "$q_reason"
       exit 1
     fi
@@ -603,6 +605,7 @@ while true; do
       narrate "ralph: review gate exhausted its rounds at turn $turn — wrote STATUS.md, stopping"
       echo "--- STATUS.md ---"
       cat STATUS.md
+      _live_append "ralph: review-exhausted reason: $(cat STATUS.md 2>/dev/null | oneline)"
       notify_human review-exhausted "$(cat STATUS.md 2>/dev/null | oneline)"
       exit 1
     fi

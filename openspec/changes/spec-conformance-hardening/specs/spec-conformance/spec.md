@@ -22,7 +22,7 @@ no diff touches the offending code.
 - **THEN** the structural check fails
 
 #### Scenario: The golden-reference example conforms to the templates
-- **WHEN** `example/` diverges from a structural rule its `templates/` counterpart must follow (e.g. a missing config key, or a restated single-source value)
+- **WHEN** the `example/ralph.conf` key set diverges from `templates/ralph.conf.example` in either direction (a documented key missing from the example, or a stray key absent from the template)
 - **THEN** the structural check fails
 
 ### Requirement: A change that adds or modifies a universal requirement declares its incumbent impact

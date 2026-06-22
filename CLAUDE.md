@@ -28,6 +28,7 @@ pytest -q -c base/tests/pytest.ini base/tests/test_until_reset.py   # unit tests
 bash base/tests/test_ralph_runner.sh                                # runner scaffold only
 bash base/tests/test_gate_hook.sh                                   # gate-hook enforcement only
 bash base/tests/test_review_gate.sh                                 # outer-loop review gate only
+bash base/tests/test_notify.sh                                      # outbound notification + blocked-question stop only
 ```
 
 The test suite is self-contained — it needs only bash, git, python3 (+ pytest), and
@@ -185,6 +186,23 @@ both required in one release.
   runner pushes over **HTTPS using the token** — at startup it runs `gh auth setup-git` and
   rewrites `git@github.com:`→`https://github.com/` (the container has no `ssh`/key), so a
   consumer's SSH remote still pushes; a failed push is surfaced, never silently swallowed.
+- **Outbound notification seam (`RALPH_NOTIFY_CMD`, opt-in, default off).** The TAP half of
+  outbound observability (the review gate / `live.log` are the WATCH half). The *runner*
+  (never the agent) invokes `<cmd> <event> <reason>` at every needs-human halt —
+  `review-exhausted`, `stall`, `stop`, and `blocked` — so the operator can walk away and be
+  summoned back. Like the reviewer, it is a pluggable command (Slack recipe in
+  `docs/recipes/slack-notify.md`; no vendored integration), startup-validated for
+  executability, and **agent-blind** in the same behavioral sense as `gh` — the webhook secret
+  shares the container env plane with `GH_TOKEN`, which is documented, not isolated.
+  Notification is **non-fatal**: `notify_human` runs the command under `RALPH_NOTIFY_TIMEOUT`
+  and ignores its status, so a failing/slow notifier never changes the loop's exit code or
+  flow (the caller `exit`s with its own explicit code). A second, independent behavior change
+  ships with it: a **blocked question** — a NEW entry in `RALPH_QUESTIONS` (default
+  `docs/questions.md`) on a no-commit turn — is now an *immediate* stop (event `blocked`),
+  ordered after the usage-limit pause + `STATUS.md` check but **before** the stall counter, so
+  one ambiguity stops promptly with a signal instead of silently burning `RALPH_MAX_STALLS`
+  turns. This is the one behavior that fires even with `RALPH_NOTIFY_CMD` unset. Runner change
+  → two-channel release (rebuild the base image).
 
 ### Invariants to preserve when editing
 
@@ -194,6 +212,17 @@ both required in one release.
   must stay in sync. `STATUS.md` is both the stop signal *and* the human cold-start
   breadcrumb, so it is normally non-empty when a fresh loop starts — that is why the
   comparison is against a startup snapshot, not against emptiness.
+- **Blocked-question detection is deliberately ASYMMETRIC to `STATUS.md`** in two ways — do not
+  "fix" either into the `STATUS.md` shape. (1) **Per-turn, not startup snapshot:** `ralph.sh`
+  snapshots `RALPH_QUESTIONS` at the *start of each turn* and stops only if THIS no-commit turn
+  changed it. A startup snapshot (the `STATUS.md` model) is WRONG here because the blocked check
+  is gated on a no-commit turn — a question added on a *committing* turn would leave a startup
+  snapshot stale and falsely halt a later unrelated no-commit turn. (2) **Detection lives once:**
+  the `/ralph-status` skill must **NOT** re-derive blocked state by reading the questions file (a
+  one-shot reader cannot tell a stale list from one written this run); the runner *persists* its
+  decision (`blocked` + `blocked_reason`, merged into `current.json` so the turn's other heartbeat
+  fields survive) and the skill reads only that. (`STATUS.md` can use a startup snapshot + be read
+  by both because its stop fires on any change and the skill only reports presence.)
 - **Config precedence is `environment > ralph.conf > built-in default`**, implemented by
   snapshotting `RALPH_*` env vars as re-runnable assignments and re-applying them *after*
   sourcing `ralph.conf`.

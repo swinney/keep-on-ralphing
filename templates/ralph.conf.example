@@ -90,6 +90,35 @@ RALPH_BASE_BRANCH=""
 # the substitution seam for a non-Copilot reviewer. Default: Copilot
 RALPH_REVIEWER=""
 
+# --- outbound notification (opt-in — ping a human when the loop needs one) ----
+#
+# When developing async (kick off a loop and walk away), the loop can summon you
+# back the moment a human is needed. The RUNNER (never the agent) invokes this
+# command as `<cmd> <event> <one-line-reason>` at every needs-human halt — events
+# are: review-exhausted, stall, stop, and blocked (a new docs/questions.md entry).
+# Notification is NON-FATAL: a notifier that errors, hangs, or is slow is killed
+# and ignored, never changing the loop's exit code or flow. Empty = off (no
+# notification side effects). See docs/recipes/slack-notify.md for a Slack webhook
+# recipe (and a zero-dep `gh pr comment` alternative).
+#
+# SECURITY: the runner runs IN the container and invokes the notifier there, so any
+# secret the command needs (e.g. SLACK_WEBHOOK_URL) lives in the container env —
+# the SAME plane as the forwarded GH_TOKEN. "Agent-blind" is behavioral (the runner
+# owns all git/gh/network work), not env isolation; treat a webhook as GH_TOKEN-grade.
+#
+# A single command/script path, run as `<cmd> <event> <reason>`. Empty = off. Default: off
+RALPH_NOTIFY_CMD=""
+
+# Seconds the notifier may run before it is killed (kept short — a halt is not
+# latency-sensitive, and a hung notifier must not delay the halt). Default: 30
+RALPH_NOTIFY_TIMEOUT="30"
+
+# The file the agent writes a blocked question to (a decision the specs don't
+# cover). A NEW entry mid-run stops the loop immediately with a `blocked`
+# notification, instead of burning RALPH_MAX_STALLS no-commit turns first. A
+# pre-existing list does NOT stop a fresh loop. Default: docs/questions.md
+RALPH_QUESTIONS="docs/questions.md"
+
 # --- container probing (status digest + Makefile) ---------------------------
 
 # Name of the loop container the status digest probes for "is it running?", and

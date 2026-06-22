@@ -32,8 +32,17 @@ the repo root, then read:
    is non-empty, the last review found issues the next turn must resolve, so show a
    short summary (the PR number from its header + the finding count). If it is
    absent/empty, the last review was clean. If the gate is off, omit this section.
-6. **Recent commits** — `git log --oneline -6`.
-7. **Live log** — if `<state_dir>/log/live.log` exists (the aggregate stream;
+6. **Notifications & blocked state** — report whether outbound notifications are
+   configured: `RALPH_NOTIFY_CMD` non-empty in `ralph.conf` → "notifications: on
+   (`<cmd>`)", else "notifications: off". Then surface a blocked-question halt
+   **only from the persisted signal** in `current.json`: if its `blocked` field is
+   `true`, report that the loop is blocked on a question and show `blocked_reason`.
+   **Do NOT read `docs/questions.md` (or `RALPH_QUESTIONS`) directly** — a one-shot
+   reader cannot tell a stale pre-existing list from one written this run, so the
+   runner's `current.json.blocked` is the only trustworthy source. If `blocked` is
+   absent/false, say nothing about questions.
+7. **Recent commits** — `git log --oneline -6`.
+8. **Live log** — if `<state_dir>/log/live.log` exists (the aggregate stream;
    present when `RALPH_LIVE_LOG` is not `0`), note its path and that
    `tail -f <state_dir>/log/live.log` follows the loop in realtime. Optionally show
    its last 1–2 lines. If absent, omit this section.
@@ -41,8 +50,8 @@ the repo root, then read:
 ## How to report
 
 Print a compact digest, in this order: running state → current turn → recent
-turns (newest last) → STATUS.md stop state → review-gate state (if on) → recent
-commits → live-log hint (if present). Keep it scannable
+turns (newest last) → STATUS.md stop state → review-gate state (if on) →
+notifications + blocked state → recent commits → live-log hint (if present). Keep it scannable
 (a few lines each). Don't editorialize; report the facts. If the state dir
 doesn't exist yet, say the loop has not run in this repo.
 
@@ -50,6 +59,9 @@ doesn't exist yet, say the loop has not run in this repo.
 - Read-only. Never start, stop, or modify the loop or its state.
 - A blank or whitespace-only `STATUS.md` is NOT a stop signal — never report it
   as one.
+- Read blocked-question state ONLY from `current.json`'s `blocked` field, never by
+  reading `docs/questions.md`/`RALPH_QUESTIONS` — the file alone cannot distinguish
+  a stale pre-existing list from one written this run.
 - If you ever present the user with a choice, follow the Ralph recommended-option
   convention: mark one option "(recommended)" first with a one-line, repo-specific
   reason; state the risk and require confirmation for any high-stakes choice.

@@ -128,6 +128,15 @@ aggregator at the bind-mounted files; the kit ships no dashboard and opens no po
 [`docs/recipes/vector-console.md`](docs/recipes/vector-console.md) for a zero-backend Vector recipe
 (console sink + `vector top`) that also centralizes several loops via one glob.
 
+## Getting summoned back
+
+Watching is the pull half; **`RALPH_NOTIFY_CMD` is the push half**. Set it to a command and the runner
+(never the agent) pings you at every needs-human halt — `stop`, `stall`, `review-exhausted`, or `blocked`
+(a new `docs/questions.md` entry, which now stops the loop immediately instead of burning stall turns).
+It is opt-in (empty = off) and non-fatal (a failing/slow notifier never changes the loop's flow). See
+[`docs/recipes/slack-notify.md`](docs/recipes/slack-notify.md) for a Slack-webhook recipe and a zero-dep
+`gh pr comment` alternative.
+
 ## Tests
 
 ```sh

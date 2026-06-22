@@ -140,6 +140,31 @@ else
   bad "example parity: key set differs between templates/ and example/: $(printf '%s' "$key_diff" | tr '\n' ' ')"
 fi
 
+# --- 4. The base-image content hash is single-sourced -----------------------
+# base_version.sh is the ONE definition of the provenance stamp; the build,
+# /ralph-build-base, /ralph-status, smoke-base, and base_freshness.sh all call it.
+# A second hand-rolled sha256 over the runner would be a drift-prone duplicate.
+hash_dups=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    base/scripts/base_version.sh | base/tests/*) continue ;; # the single source + the tests that name the tool
+  esac
+  [ -f "$f" ] || continue
+  if grep -qE 'sha256sum|shasum[[:space:]]+-a[[:space:]]+256' "$f"; then
+    hash_dups="${hash_dups}${f}
+"
+  fi
+done <<EOF
+$(tracked '*.sh' '*.template' 'Makefile' 'base/Containerfile')
+EOF
+if [ -z "$hash_dups" ]; then
+  ok "single-source hash: only base_version.sh computes the provenance stamp (no re-implementation)"
+else
+  bad "single-source hash: a sha256 over the runner is re-implemented outside base_version.sh:"
+  printf '%s' "$hash_dups" | sed 's/^/      /'
+fi
+
 echo
 echo "conformance tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

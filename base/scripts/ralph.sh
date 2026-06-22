@@ -104,6 +104,10 @@ notify_timeout=${RALPH_NOTIFY_TIMEOUT:-30}
 # The file the PROMPT contract has the agent write when it hits a decision the
 # specs don't cover; a NEW entry mid-run is a blocked-stop signal (like STATUS.md).
 questions_file=${RALPH_QUESTIONS:-docs/questions.md}
+# Provenance stamp baked into the base image at build time (base/Containerfile);
+# narrated at startup so the aggregate log records which runner is executing.
+# Overridable for tests; "unknown" if the file is absent (older/odd image).
+base_version_file=${RALPH_BASE_VERSION_FILE:-/etc/ralph-base.version}
 # Aggregate log: a single append-only tail target (runner narration + agent
 # output, turn-prefixed) for an external aggregator. On by default; =0 reproduces
 # the pre-feature behaviour exactly. See the Vector recipe in docs/.
@@ -484,6 +488,9 @@ run_turn() {
 }
 
 trap 'echo; _sig="ralph: caught SIGINT at turn $turn, exiting"; echo "$_sig"; _live_append "$_sig"; exit 130' INT
+
+base_version=$(cat "$base_version_file" 2>/dev/null | tr -d '[:space:]')
+narrate "ralph: base-version ${base_version:-unknown}"
 
 if [ "$once" -eq 1 ]; then
   narrate "ralph: single turn (--once) starting from turn $turn"

@@ -39,6 +39,10 @@ echo "== outbound notification tests =="
 bash "$here/test_notify.sh" || rc=1
 
 echo
+echo "== base-image freshness tests =="
+bash "$here/test_base_freshness.sh" || rc=1
+
+echo
 echo "== structural conformance tests =="
 bash "$here/test_conformance.sh" || rc=1
 

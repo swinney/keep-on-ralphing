@@ -19,6 +19,12 @@ the repo root, then read:
    `RALPH_RUNTIME` (default `podman`) from `ralph.conf`. If that runtime is on
    PATH, run `<runtime> ps --filter name=<container> --format '{{.Names}} {{.Status}}'`.
    If nothing matches (or the runtime is absent), report "not running".
+1b. **Base-image freshness** — if the plugin's `base/scripts/base_freshness.sh` is
+   resolvable (via `$CLAUDE_PLUGIN_ROOT`) and the runtime is on PATH, run it and
+   report the verdict: `current` (the baked `ralph-base:v1` matches the bundled
+   `base/` and the host UID/GID) or `stale: <reason>` (rebuild with
+   `/ralph-build-base`). Read-only — it never rebuilds. If the helper/runtime is
+   unavailable, report "base-image freshness: unknown" and move on; never fail.
 2. **Current turn** — `<state_dir>/current.json` (the heartbeat: turn, task,
    model, state, started). If absent, "no heartbeat yet".
 3. **Recent turns** — the last ~10 lines of `<state_dir>/status.jsonl`; each line

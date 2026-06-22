@@ -31,19 +31,41 @@ what invoking this skill does. Never hand the user a frozen cache path to reuse.
    the user exactly what's unmet — do not silently skip; a missing image only
    surfaces later as a failure at `make loop`.
 
-3. **Build.** Run, from the plugin root so the Makefile's relative paths resolve:
+2b. **Freshness check (skip a needless rebuild).** Unless the user passed a force
+   option, run the shared decision helper and act on its verdict:
+
+   ```sh
+   bash "$CLAUDE_PLUGIN_ROOT/base/scripts/base_freshness.sh"   # exit 0 current, 1 stale/unknown, 2 internal error
+   ```
+
+   It declares `ralph-base:v1` **current** only when its baked provenance stamp
+   matches the bundled `base/` (`base_version.sh`) AND its baked UID/GID match the
+   host's `id -u`/`id -g`. Act on the exit code:
+   - **exit 0** (`current:`) — report "already current" and **skip the build**.
+   - **exit 1** (`stale:`/`unknown:` — image missing, runner changed, UID/GID
+     differ, or runtime absent) **or the user forced it** — proceed to build.
+   - **exit 2** (`error:` — the bundled stamp could not be computed: a missing
+     source or no sha256 tool) — STOP and report the broken setup; do NOT blindly
+     rebuild (the build would hit the same failure).
+
+   This makes the skill safe to run routinely / after every `/plugin update`.
+
+3. **Build (when stale or forced).** Run, from the plugin root so the Makefile's relative paths resolve:
 
    ```sh
    make -C "$CLAUDE_PLUGIN_ROOT" build-base
    ```
 
    This tags `ralph-base:v1`, registry-free, passing the host UID/GID as build args
-   (`--build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)`) so files the loop
-   writes under the bind-mounted `/workspace` come out host-owned under rootless
-   podman. The `make`-free equivalent (e.g. a non-default runtime) is:
+   (`--build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)`) and the provenance
+   stamp (`--build-arg RALPH_BASE_VERSION=$(bash base/scripts/base_version.sh)`), so
+   files the loop writes under the bind-mounted `/workspace` come out host-owned under
+   rootless podman and the image is afterward freshness-checkable. The `make`-free
+   equivalent (e.g. a non-default runtime) is:
 
    ```sh
    podman build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g) \
+     --build-arg RALPH_BASE_VERSION=$(bash "$CLAUDE_PLUGIN_ROOT/base/scripts/base_version.sh") \
      -t ralph-base:v1 \
      -f "$CLAUDE_PLUGIN_ROOT/base/Containerfile" "$CLAUDE_PLUGIN_ROOT/base"
    ```

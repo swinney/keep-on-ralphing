@@ -206,6 +206,28 @@ grep -q 'disabling live.log' "$WS/err.txt" \
   || bad "no warning emitted when prefixer unavailable"
 cleanup
 
+# --- 7. unwritable live.log path → graceful degrade, no broken pipe ---------
+# Occupy the live.log path with a DIRECTORY so the fan-out's `>> "$live_log"`
+# append cannot succeed. The turn must still complete with the agent's output
+# intact (no SIGPIPE/truncation); live logging disables + warns.
+new_ws
+mkdir -p "$WS/.ralph/log/live.log"   # a dir where the file should be → not appendable
+cat >"$STUB/count-1.sh" <<'S'
+echo "WRITEMARK"
+git commit --allow-empty -qm t1
+S
+RALPH_ARGS="--once" run_ralph >"$WS/out.txt" 2>"$WS/err.txt"
+ec=$?
+[ "$ec" -eq 0 ] && ok "unwritable live.log: turn still exits 0 (no broken pipe)" \
+  || bad "unwritable live.log broke the turn (exit=$ec)"
+grep -q 'WRITEMARK' "$WS/.ralph/log/turn-1.txt" \
+  && ok "unwritable live.log: turn-N.txt not truncated" \
+  || bad "unwritable live.log truncated turn-N.txt"
+grep -q 'not writable' "$WS/err.txt" \
+  && ok "unwritable live.log: warned on stderr" \
+  || bad "no warning when live.log is unwritable"
+cleanup
+
 echo
 echo "live.log tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

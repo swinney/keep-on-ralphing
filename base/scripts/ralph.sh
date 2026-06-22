@@ -143,6 +143,15 @@ if [ "$live_log_enabled" = 1 ] &&
   live_log_enabled=0
 fi
 
+# Same failure, different cause: if the sink path is not appendable (a read-only
+# bind-mount, or a stale directory sitting at live.log), the fan-out's
+# `>> "$live_log"` redirect fails before the prefixer reads, closing the pipe and
+# triggering the same tee SIGPIPE / truncation. Preflight with a no-op append.
+if [ "$live_log_enabled" = 1 ] && ! (: >>"$live_log") 2>/dev/null; then
+  echo "ralph: RALPH_LIVE_LOG=1 but $live_log is not writable — disabling live.log for this run" >&2
+  live_log_enabled=0
+fi
+
 model_args=()
 [ -n "${RALPH_MODEL:-}" ] && model_args=(--model "$RALPH_MODEL")
 

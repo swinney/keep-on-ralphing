@@ -121,6 +121,48 @@ cache is pruned after an update), never a frozen cache path.
 `make loop` refuses a loop image built on a superseded base (run `make build`). Freshness
 keys on the content hash (plus the host UID/GID), not the plugin version.
 
+## Upgrading an already-installed harness
+
+Upgrading spans all three channels (see [Three channels](#three-channels)): the **plugin** (skills +
+templates) and the **base image** (the runner) have clean update paths (steps 1–2); your **in-repo config**
+(the files `/ralph-init` generated) does not — **re-running `/ralph-init` does NOT upgrade an existing
+project** (it is no-overwrite: it only scaffolds *missing* files, never changes ones you already have), which
+is why step 3 is a manual merge.
+
+**1. Update the plugin** (latest skills + templates):
+```
+/plugin marketplace update keep-on-ralphing
+/plugin update ralph-harness@keep-on-ralphing
+/reload-plugins
+```
+
+**2. Rebuild the base image** when the runner changed (most releases) — the loop keeps running the *old*
+runner until you do:
+```
+/ralph-build-base        # rebuilds ralph-base:v1 from the freshly-updated plugin
+```
+then `make build` in each project. `/ralph-build-base` is idempotent (it skips the rebuild when already
+current), and `/ralph-status` plus the `make loop` `check-base` preflight flag a stale base, so you don't
+have to track this by hand.
+
+**3. Adopt config changes in an existing project (manual).** Because `/ralph-init` never overwrites, new
+template *content* doesn't reach a project that already has those files. Diff your files against the plugin's
+bundled `templates/` (or the golden `example/`) — they live under `$CLAUDE_PLUGIN_ROOT` (resolvable inside
+Claude Code, e.g. `$CLAUDE_PLUGIN_ROOT/templates/`; contributors with a checkout use the repo's `templates/`)
+— and merge by hand:
+- **`Makefile`** — the one that can *break* the loop. Newer versions forward `GH_TOKEN` into the container
+  (the default-on review gate needs it) and add a `check-base` preflight. A `Makefile` missing the
+  `GH_TOKEN` forwarding makes a review-gated loop **refuse to start** — merge it in, or set
+  `RALPH_REVIEW_GATE=0` for an offline loop.
+- **`ralph.conf`** — new keys have built-in defaults, so the loop runs without them; copy the new commented
+  keys from `example/ralph.conf` only to discover/tune them.
+- **`PROMPT.md`** — merge in any new contract clauses you want.
+- **New files** (e.g. `docs/operator-checklist.md`) — these `/ralph-init` *will* add on a re-run (it creates
+  missing files, skips existing), or copy them from the plugin.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the per-version feature list — entries that change the runner are
+marked "rebuild the base image." (Automating step 3's config merge as a `/ralph-upgrade` skill is proposed.)
+
 ## Configuration
 
 Everything project-specific lives in one `ralph.conf` (env vars override it).

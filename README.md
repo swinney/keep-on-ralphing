@@ -144,6 +144,58 @@ It is opt-in (empty = off) and non-fatal (a failing/slow notifier never changes 
 [`docs/recipes/slack-notify.md`](docs/recipes/slack-notify.md) for a Slack-webhook recipe and a zero-dep
 `gh pr comment` alternative.
 
+## Work-class model dispatch (optional)
+
+One model for everything wastes the strong model on trivial tasks and stalls the
+cheap one on hard tasks. So the runner can **match the model to each task's work
+class**: tag a task in `tasks.md` with a trailing class token —
+
+```
+- [ ] 2.3 migrate the session store (stateful)
+```
+
+— and map that class to a model in `ralph.conf` with `RALPH_MODEL_<CLASS>` (e.g.
+`RALPH_MODEL_STATEFUL="claude-opus-4-8"`). That task's turn runs on the mapped
+model; an **untagged** task uses `RALPH_MODEL` exactly as before, so the feature is
+inert until you both tag tasks and set keys. Classification is the operator's call —
+**the runner never auto-classifies.** It is a *cost dial, not a correctness lever*:
+the gate and commit-as-truth remain the correctness guarantee, so a misclassified
+task can at worst stall (caught by the stall detector), never ship a bad commit.
+
+## One orchestrator per workspace
+
+The runner takes a `flock` on `$RALPH_STATE_DIR/lock` on startup and **refuses to
+start a second concurrent loop on the same workspace** — competing loops corrupt
+shared state (`.ralph/`, the branch). Because the loop runs as PID 1 in its
+container, the lock uses `flock` (not a PID file): the kernel releases it when the
+holder dies — including a `podman stop`/SIGKILL/OOM that skips the exit handler — so
+a leftover lock self-heals and the next start reacquires it cleanly, rather than a
+stale "PID 1" blocking the loop forever. (Where `flock` is unavailable, outside the
+supported Linux+podman scope, the runner warns and runs without the lock.)
+
+## Autonomy is a gated opt-in; velocity targets serial latency
+
+Unattended (walk-away) operation is an **opt-in mode, not the headline** — in
+evidence it was *catalytic and narrow-band*, not a general accelerator. Walk away
+only when **all four** preconditions hold: (1) the work is well-specified, (2) the
+model is matched from turn 1 (tag the class, don't "start cheap, escalate"), (3) you
+are genuinely absent (if you'll watch anyway, run it supervised — supervision
+catches more), and (4) *for fan-out only*, single-unit build time dominates per-unit
+coordination cost. If any is false, build supervised-direct. Parallel content
+fan-out (`extras/`) is **serial-by-default / unsupported** and was net-negative at
+small unit size — not a turnkey speedup.
+
+To go **faster**, target *serial latency*, not turn throughput: the bottleneck is
+the human-gate cycle (PR → CI → review → fixes → merge), so batch a milestone per
+PR, auto-merge on a clean review, and match the model to the work class — rather
+than adding containers/agents to the same milestone (systems-layer work shares files
+and collides; turn throughput was never the constraint).
+
+`/ralph-init` scaffolds an **operator checklist** (`docs/operator-checklist.md`)
+carrying these preconditions plus the pre-action checklists — and the caution that a
+clean commit graph is *not* evidence of a well-run session ("resilience masks
+sloppiness"); discipline needs its own signal, not the green graph.
+
 ## Tests
 
 ```sh

@@ -165,8 +165,9 @@ if [ "$live_log_enabled" = 1 ] && ! (: >>"$live_log") 2>/dev/null; then
   live_log_enabled=0
 fi
 
-model_args=()
-[ -n "${RALPH_MODEL:-}" ] && model_args=(--model "$RALPH_MODEL")
+# The model passed to `claude --model` is selected PER TURN (see select_model),
+# from the work-class tag on the task that turn picks up — so it is built inside
+# run_turn, not once here. RALPH_MODEL remains the default for untagged tasks.
 
 # Validate the optional notifier up front (independent of the review gate — it
 # fires at the stall/stop/blocked halts too, which run with the gate off): a
@@ -233,6 +234,45 @@ notify_human() {
 first_task() {
   grep -m1 '^- \[ \] ' "$tasks_file" 2>/dev/null \
     | sed -E 's/^- \[ \] *//; s/⛔ MILESTONE GATE.*/[milestone gate]/'
+}
+
+# The operator's work-class tag on the first unchecked task: a trailing
+# single-token parenthesis like "(stateful)". Empty when the task is untagged.
+# Orthogonal to the existing markers — it does not collide with the "- [ ] "
+# checkbox, the "Ralph-Task:" commit trailer, or the "⛔ MILESTONE GATE" marker
+# (none of which end in a parenthesized single token). Multi-word parentheses
+# (e.g. "(see #12)") contain a space and are deliberately NOT matched, so only an
+# explicit class token is treated as a tag.
+first_task_class() {
+  grep -m1 '^- \[ \] ' "$tasks_file" 2>/dev/null \
+    | sed -nE 's/.*\(([A-Za-z][A-Za-z0-9_-]*)\)[[:space:]]*$/\1/p'
+}
+
+# Select the model for the upcoming turn from the task's work-class tag, via the
+# RALPH_MODEL_<CLASS> dispatch table; fall back to RALPH_MODEL when the task is
+# untagged or its class has no table entry. The runner NEVER auto-classifies —
+# the tag is an explicit operator act (the framework forbids "auto"). A misclass
+# is a cost dial only: the gate + commit-as-truth still guarantee correctness, so
+# at worst a wrong model stalls a turn, it never ships a bad commit.
+#
+# bash 3.2-safe: uppercases the class with tr (not ${x^^}) and resolves the key
+# with indirect expansion ${!var} (not an associative array) — the same approach
+# the env-override snapshot at the top already uses. Precedence is preserved for
+# free: any RALPH_MODEL_* set in the environment was captured and re-applied over
+# ralph.conf, so env > conf > default holds for the table keys too.
+select_model() {
+  local class cls_uc varname mapped
+  class=$(first_task_class)
+  if [ -n "$class" ]; then
+    cls_uc=$(printf '%s' "$class" | tr 'a-z-' 'A-Z_')
+    varname="RALPH_MODEL_${cls_uc}"
+    mapped="${!varname:-}"
+    if [ -n "$mapped" ]; then
+      printf '%s\n' "$mapped"
+      return
+    fi
+  fi
+  printf '%s\n' "${RALPH_MODEL:-}"
 }
 
 # Emit a status record from RJ_* env vars. mode=current overwrites the heartbeat
@@ -428,16 +468,21 @@ run_turn() {
   turn=$((turn + 1))
   echo "$turn" >"$turn_file"
   local log="$state_dir/log/turn-${turn}.txt"
-  local task started ended before after committed sha subject summary
+  local task started ended before after committed sha subject summary turn_model
+  local model_args=()
   task=$(first_task)
+  # Per-turn model: the work-class dispatch table for this task's tag, else the
+  # default. Built here (not once at startup) so each turn dispatches its own model.
+  turn_model=$(select_model)
+  [ -n "$turn_model" ] && model_args=(--model "$turn_model")
   started=$(date -Is)
   before=$(head_rev)
 
   # Heartbeat: what is running right now.
-  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="${RALPH_MODEL:-}" RJ_STATE="running" \
+  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="$turn_model" RJ_STATE="running" \
     RJ_STARTED="$started" emit_status current
 
-  narrate "ralph: turn $turn ($started)${RALPH_MODEL:+ model=$RALPH_MODEL} timeout=${turn_timeout}s -> $log"
+  narrate "ralph: turn $turn ($started)${turn_model:+ model=$turn_model} timeout=${turn_timeout}s -> $log"
   narrate "ralph:   task -> ${task:-<none>}"
   # stdbuf -oL line-buffers output so `tail -f` shows progress LIVE, not only
   # when the turn ends. timeout sends TERM at the cap, then KILL 30s later.
@@ -471,10 +516,10 @@ run_turn() {
   ended=$(date -Is)
 
   # Objective, git-derived record of the completed turn.
-  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="${RALPH_MODEL:-}" RJ_STATE="done" \
+  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="$turn_model" RJ_STATE="done" \
     RJ_STARTED="$started" RJ_ENDED="$ended" RJ_EXIT="$turn_ec" \
     RJ_COMMITTED="$committed" RJ_SHA="$sha" RJ_SUBJECT="$subject" emit_status append
-  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="${RALPH_MODEL:-}" RJ_STATE="idle" \
+  RJ_TURN="$turn" RJ_TASK="$task" RJ_MODEL="$turn_model" RJ_STATE="idle" \
     RJ_STARTED="$started" RJ_ENDED="$ended" RJ_EXIT="$turn_ec" \
     RJ_COMMITTED="$committed" RJ_SHA="$sha" RJ_SUBJECT="$subject" emit_status current
 
@@ -486,6 +531,61 @@ run_turn() {
   echo "$summary" | tee -a "$log"
   _live_append "$summary"
 }
+
+# --- one-orchestrator workspace lock ----------------------------------------
+# Competing loops on the same workspace corrupt shared state (.ralph/, the branch);
+# §5.15 of the field log paid for that. Guard it with flock(1) on $state_dir/lock —
+# a kernel lock on the bind-mounted inode. Two properties make flock the right tool
+# where a bare PID file is NOT:
+#   * Atomic acquisition — no check-then-write race between two simultaneous starts.
+#   * Auto-release on process death ACROSS PID namespaces. The runner is PID 1 in its
+#     own container, so when a loop container is `podman stop`ped / SIGKILLed / OOM-
+#     killed (the EXIT trap never runs) a PID file would be left holding "1" — and the
+#     NEXT container's own PID 1 is alive, so a PID liveness check would read the
+#     stale lock as live and refuse FOREVER. flock keys on the shared inode, not a
+#     namespace-local PID, so the kernel drops it when the fd closes and the next
+#     container reacquires cleanly. (This reverses the original PID design — see
+#     design.md D4 — because cross-namespace liveness is unknowable from a PID alone.)
+# fd 9 is held open for the whole run (bash 3.2-safe fixed fd, not the 4.1 {var}
+# form). The file content is our PID — informational for /ralph-status only; flock,
+# not the content, is the authority. If flock is unavailable (outside the supported
+# Linux+podman scope), degrade to a warned no-lock rather than ship a PID check that
+# is known-broken in containers — the same graceful-degradation idiom as live.log.
+# Released via the EXIT trap below — which also fires when the SIGINT handler calls
+# `exit`, so Ctrl-C releases it too (and flock auto-releases regardless).
+lock_file="$state_dir/lock"
+lock_held=0
+acquire_lock() {
+  command -v flock >/dev/null 2>&1 || {
+    echo "ralph: flock not available — running WITHOUT a workspace lock (concurrent-loop protection off)" >&2
+    return 0
+  }
+  # Open the lock file on fd 9; a path that is a directory or unwritable fails here.
+  exec 9>"$lock_file" || {
+    echo "ralph: cannot open workspace lock $lock_file — refusing to start" >&2
+    exit 1
+  }
+  if ! flock -n 9; then
+    echo "ralph: another loop holds the workspace lock $lock_file — refusing to start" >&2
+    exit 1
+  fi
+  lock_held=1
+  # Record our PID for humans / ralph-status (informational; flock is the authority).
+  printf '%s\n' "$$" >&9 2>/dev/null || true
+}
+# Release only if we actually hold it: drop the flock (close fd 9) and remove the
+# file. A refused start (another loop holds it, lock_held=0) must NOT rm the file or
+# it would orphan the incumbent's lock. flock also auto-releases on process exit, so
+# this is the tidy path, not the only one.
+release_lock() {
+  [ "$lock_held" = 1 ] || return 0
+  rm -f "$lock_file" 2>/dev/null || true
+  exec 9>&- 2>/dev/null || true
+  lock_held=0
+  return 0
+}
+acquire_lock
+trap release_lock EXIT
 
 trap 'echo; _sig="ralph: caught SIGINT at turn $turn, exiting"; echo "$_sig"; _live_append "$_sig"; exit 130' INT
 

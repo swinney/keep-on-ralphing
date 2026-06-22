@@ -28,6 +28,8 @@ pytest -q -c base/tests/pytest.ini base/tests/test_until_reset.py   # unit tests
 bash base/tests/test_ralph_runner.sh                                # runner scaffold only
 bash base/tests/test_gate_hook.sh                                   # gate-hook enforcement only
 bash base/tests/test_review_gate.sh                                 # outer-loop review gate only
+bash base/tests/test_work_dispatch.sh                              # work-class model dispatch only
+bash base/tests/test_orchestrator_lock.sh                          # one-orchestrator workspace lock only
 bash base/tests/test_notify.sh                                      # outbound notification + blocked-question stop only
 bash base/tests/test_conformance.sh                                 # structural spec-conformance checks (scans source, no loop)
 bash base/tests/test_base_freshness.sh                              # base-image freshness decision (stamp + UID/GID), stubbed runtime
@@ -170,6 +172,30 @@ both required in one release.
   `current.json` (heartbeat), `status.jsonl` (one git-derived record per completed turn),
   `log/turn-<n>.txt` (line-buffered per-turn output), `turn` (counter). The
   `/ralph-status` skill reads these directly — there is no shipped status script.
+- **Work-class model dispatch (`RALPH_MODEL_<CLASS>`, opt-in).** A task may carry a trailing
+  work-class tag in tasks.md (e.g. `(stateful)`); `select_model()` maps the class to a model via the
+  `RALPH_MODEL_<CLASS>` table and passes it as `claude --model` for that turn, falling back to
+  `RALPH_MODEL` when untagged. Operator-tagged only — **the runner never auto-classifies** (the
+  framework forbids "auto"). It is a *cost dial, not a correctness lever*: the gate + commit-as-truth
+  are untouched, so a misclass at worst stalls, never ships a bad commit. The model is selected PER
+  TURN inside `run_turn` (not once at startup) and recorded in `status.jsonl`'s `model` field. The
+  tag is a trailing single-token `(...)` deliberately orthogonal to `- [ ]`, the `Ralph-Task:`
+  trailer, and `⛔ MILESTONE GATE` — see `first_task_class()`. bash 3.2-safe (indirect `${!var}` +
+  `tr`, no associative arrays; precedence rides the existing env-snapshot). Runner change →
+  two-channel release.
+- **One-orchestrator workspace lock.** At startup the runner takes a **`flock`** on
+  `$RALPH_STATE_DIR/lock` (held on fd 9 for the run): refuses to start if another loop holds it; the
+  kernel auto-releases it when the holder dies, so a leftover lock self-heals. `flock` (not a PID
+  file) is load-bearing: the runner is **PID 1** in its container, so a `podman stop`/SIGKILL/OOM
+  (the EXIT trap never runs) would leave a PID file holding "1", and the next container's own live
+  PID 1 would read it as live and refuse FOREVER — cross-namespace liveness is unknowable from a PID.
+  flock keys on the shared bind-mounted inode (atomic + namespace-safe). See design.md D4 (a reversal
+  made during PR review). Degrades to a warned no-lock where flock is absent (live.log idiom). The
+  EXIT trap also fires when the SIGINT handler calls `exit` (and `release_lock` only acts when it
+  actually holds the lock — a refused start never rm's the incumbent's file). `/ralph-status` reports
+  lock presence but must NOT `kill -0` the file's PID (informational only; the loop's
+  container-namespace value) — liveness is the container-running check. Runner change → two-channel
+  release.
 - **Aggregate log for an external aggregator (`RALPH_LIVE_LOG`, ON by default).** The runner also
   writes `log/live.log` — one append-only tail target interleaving runner narration (`narrate()`) with
   agent output, each line `turn=<n>`-prefixed + ISO-timestamped. Agent output is fanned in via a `tee`

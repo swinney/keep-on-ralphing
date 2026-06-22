@@ -59,6 +59,27 @@ or tests to silence a finding. Do not pick a /tasks.md task while
   ad-hoc logging, diagnostics, etc. Such scaffolding must never land in a
   commit. If a test is failing, fix the cause; do not leave probes behind.
 - Never modify another subsystem's tests to make your code pass
+- A task may carry a trailing work-class tag like `(stateful)` — an operator hint
+  the RUNNER reads to pick the model for the turn. Leave it intact when you check
+  the task off; do not add, remove, or invent these tags. Classification is the
+  operator's job, never yours.
+
+## Discipline
+You act as an automated operator inside each turn — you reproduce failures and
+reason about external systems — so undisciplined action burns the turn. Apply:
+- **Triage before brute force.** When a test fails intermittently, triage first:
+  is the failure *possible from the code path* you changed, an *infrastructure
+  artifact* (network, clock, ordering), and is reproducing it *worth this turn*?
+  Only then run a reproduction loop — never spin reproductions blind.
+- **Defer to ground truth on external systems.** When you would explain why CI,
+  the reviewer, or an API behaved a certain way, state what you have *verified*
+  and flag what is *inferred* — do not assert a tidy causal narrative from
+  indirect signals. The gate and CI are ground truth; read them, don't theorize
+  past them.
+- **Keep scope constraints in this prompt, not the filesystem.** Do not create
+  scratch files, scope notes, or self-directed TODO markers to steer yourself;
+  the task plus these rules are the scope, and any debug scaffolding you add is
+  removed before the commit (above).
 
 ## Stop conditions
 - If /tasks.md is fully checked, write "RALPH: project complete"

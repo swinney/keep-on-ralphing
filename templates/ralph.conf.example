@@ -30,7 +30,28 @@ RALPH_STATE_DIR=".ralph"
 # --- agent / turn behaviour --------------------------------------------------
 
 # Model id passed to `claude --model`. Leave empty to use the account default.
+# This is the DEFAULT model, used for any task not tagged with a work class below.
 RALPH_MODEL=""
+
+# --- work-class model dispatch (optional cost dial) --------------------------
+#
+# Match the model to each task's WORK CLASS instead of running one model for
+# everything. Tag a task in tasks.md with a trailing class token, e.g.
+#     - [ ] 2.3 migrate the session store (stateful)
+# and map that class to a model here with a RALPH_MODEL_<CLASS> key (the class
+# upper-cased, hyphens -> underscores, so "(pure-logic)" -> RALPH_MODEL_PURE_LOGIC).
+# The runner then passes that model as `claude --model` for that task's turn. An
+# UNTAGGED task uses RALPH_MODEL above, exactly as before — so this is INERT until
+# you both tag tasks and set keys (precedence is env > ralph.conf > default, same
+# as every key here).
+#
+# Classification is YOUR call — the runner never auto-classifies. It is a cost
+# dial, not a correctness lever: a misclassified task can at worst stall (the gate
+# + commit-as-truth remain the correctness guarantee), never ship a bad commit.
+# Spend the stronger model where work is stateful/integration-heavy and run a
+# cheaper one on well-specified pure logic. Uncomment and set to your model ids:
+# RALPH_MODEL_STATEFUL=""   # stronger model, for stateful/integration tasks tagged (stateful)
+# RALPH_MODEL_PURE=""       # cheaper model, for well-specified pure tasks tagged (pure)
 
 # Per-turn wall-clock cap in seconds. A turn exceeding it is killed and retried
 # (counts as a no-commit turn). Default: 1200 (20 min)

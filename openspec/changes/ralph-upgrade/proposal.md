@@ -68,8 +68,9 @@ safe.
   pointer to `/ralph-upgrade` for upgrades. `.claude-plugin/plugin.json` lists the new skill (version bump).
 - **Templates/example:** the scaffold manifest format; `example/` gains the manifest so it stays the golden
   reference.
-- **Docs:** README documents the upgrade path (`/plugin update` → `/ralph-build-base` → `/ralph-upgrade`);
-  CHANGELOG may carry per-release "consumer migration notes" the skill can also key on.
+- **Docs:** README documents the *manual* upgrade path (`/plugin update` → `/ralph-build-base` → hand-merge
+  config), with `/ralph-upgrade` noted as proposed; once this lands, the manual config step becomes
+  `/ralph-upgrade`. CHANGELOG may carry per-release "consumer migration notes" the skill can also key on.
 - **No runner change.** This is host-side (skills/templates/docs) only — a one-channel (plugin) release; it
   does not touch `base/scripts/` and needs no base-image rebuild.
 - **Compatibility:** additive and non-breaking. Existing projects gain an opt-in upgrade path; the manifest

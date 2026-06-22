@@ -123,9 +123,11 @@ keys on the content hash (plus the host UID/GID), not the plugin version.
 
 ## Upgrading an already-installed harness
 
-A release ships through two channels (the **plugin** = skills + templates, and the **base image** = the
-runner), so upgrading touches both. **Re-running `/ralph-init` does NOT upgrade an existing project** — it is
-no-overwrite, so it only scaffolds *missing* files and never changes ones you already have.
+Upgrading spans all three channels (see [Three channels](#three-channels)): the **plugin** (skills +
+templates) and the **base image** (the runner) have clean update paths (steps 1–2); your **in-repo config**
+(the files `/ralph-init` generated) does not — **re-running `/ralph-init` does NOT upgrade an existing
+project** (it is no-overwrite: it only scaffolds *missing* files, never changes ones you already have), which
+is why step 3 is a manual merge.
 
 **1. Update the plugin** (latest skills + templates):
 ```
@@ -144,8 +146,10 @@ current), and `/ralph-status` plus the `make loop` `check-base` preflight flag a
 have to track this by hand.
 
 **3. Adopt config changes in an existing project (manual).** Because `/ralph-init` never overwrites, new
-template *content* doesn't reach a project that already has those files. Diff your files against the updated
-`templates/` (or the golden `example/`) and merge by hand:
+template *content* doesn't reach a project that already has those files. Diff your files against the plugin's
+bundled `templates/` (or the golden `example/`) — they live under `$CLAUDE_PLUGIN_ROOT` (resolvable inside
+Claude Code, e.g. `$CLAUDE_PLUGIN_ROOT/templates/`; contributors with a checkout use the repo's `templates/`)
+— and merge by hand:
 - **`Makefile`** — the one that can *break* the loop. Newer versions forward `GH_TOKEN` into the container
   (the default-on review gate needs it) and add a `check-base` preflight. A `Makefile` missing the
   `GH_TOKEN` forwarding makes a review-gated loop **refuse to start** — merge it in, or set

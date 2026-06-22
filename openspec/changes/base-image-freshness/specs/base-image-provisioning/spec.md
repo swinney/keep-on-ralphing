@@ -30,11 +30,13 @@ tag is afterward machine-identifiable.
 ### Requirement: Provide a rebuild-after-update path
 
 After the plugin is updated, the operator SHALL be able to rebuild `ralph-base:v1` from the newly installed
-bundled `base/` with a single documented, plugin-side action, so the runner stays in lockstep with the
-installed plugin version. That action SHALL be freshness-aware: it rebuilds when the baked provenance stamp
-differs from the currently bundled `base/` (or the image is missing/unstamped, or a force option is given),
+bundled `base/` with a single documented, plugin-side action, so the baked runner stays current with the
+bundled `base/` sources the operator now has (which a plugin update refreshes). That action SHALL be
+freshness-aware: it rebuilds when the baked provenance stamp differs from the currently bundled `base/`, when
+the baked UID/GID differ from the host, when the image is missing/unstamped, or when a force option is given,
 and otherwise reports the image is already current and skips the rebuild — so it is safe to run routinely
-without a wasteful unconditional build.
+without a wasteful unconditional build. Freshness keys on the content-hash stamp (and the host UID/GID), not
+on the human-set plugin version.
 
 #### Scenario: Rebuild after a plugin update picks up the new runner
 

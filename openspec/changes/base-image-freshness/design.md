@@ -52,6 +52,15 @@ after every plugin update / eventually from a hook, without a wasteful unconditi
 *Why here:* it is the only affordance that resolves `$CLAUDE_PLUGIN_ROOT` clone-free, so it must own both
 the stamp computation and the build.
 
+*Freshness key = (content stamp, host UID/GID), not the stamp alone.* The build bakes the host
+`USER_UID`/`USER_GID` for bind-mount ownership (an existing `base-image-provisioning` guarantee), and those
+are build-arg VALUES — not hashed file content — so a stamp-only "current" verdict would skip a rebuild for
+an image whose baked UID/GID no longer match this host, silently reintroducing the ownership bug. So the
+build also bakes the UID/GID as labels (`org.ralph.user-uid`/`-gid`), and the freshness check declares the
+image current only when the stamp matches AND the baked UID/GID equal `id -u`/`id -g`; any mismatch forces a
+rebuild. The content hash stays pure (source content only, portable/meaningful); UID/GID is a *separate*
+equality in the decision, not folded into the hash.
+
 ### D4 — Three surfacing touchpoints, because no single one covers everyone
 - **`/ralph-status`** (host-side reader): inspects the image `LABEL` and compares it to the current bundled
   `base/` stamp; reports the baked stamp and flags drift. Catches the Claude-Code operator.

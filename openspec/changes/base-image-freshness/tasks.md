@@ -1,12 +1,12 @@
 ## 1. Provenance stamp primitive (one shared definition)
 
 - [ ] 1.1 Add `base/scripts/base_version.sh` — print a portable content hash (`sha256sum`/`shasum -a 256` over a FIXED, sorted list of the runner sources + `base/Containerfile`, contents only, no mtime). This is the ONE definition both the build and the readers call; bash 3.2-safe
-- [ ] 1.2 `base/Containerfile`: add `ARG RALPH_BASE_VERSION`, a `LABEL org.ralph.base-version="$RALPH_BASE_VERSION"`, and write it to `/etc/ralph-base.version`. Keep the `ARG`/`LABEL` lines static (value injected at build time) so hashing the `Containerfile` stays stable (no circularity)
+- [ ] 1.2 `base/Containerfile`: add `ARG RALPH_BASE_VERSION` + `LABEL org.ralph.base-version="$RALPH_BASE_VERSION"` (also written to `/etc/ralph-base.version`), AND `LABEL org.ralph.user-uid="$USER_UID"` / `org.ralph.user-gid="$USER_GID"` (so the freshness check can read the baked ownership inputs). Keep the `ARG`/`LABEL` lines static (values injected at build time) so hashing the `Containerfile` stays stable (no circularity)
 - [ ] 1.3 `Makefile` `build-base`: compute the stamp via `base_version.sh` and pass `--build-arg RALPH_BASE_VERSION=<hash>` alongside the existing UID/GID args
 
 ## 2. Freshness-aware, idempotent rebuild (the trigger)
 
-- [ ] 2.1 `skills/ralph-build-base/SKILL.md`: before building, compute the bundled `base/` stamp (`base_version.sh`) and read the baked `LABEL` (`podman image inspect`); rebuild only when they differ, the image is missing/unstamped, or `--force` is given; otherwise report "already current" and skip. Resolve `$CLAUDE_PLUGIN_ROOT` fresh (no frozen cache path)
+- [ ] 2.1 `skills/ralph-build-base/SKILL.md`: before building, compute the bundled `base/` stamp (`base_version.sh`) and read the baked `LABEL`s (`podman image inspect`); declare the image current — and skip — only when the stamp matches AND the baked `org.ralph.user-uid`/`-gid` equal the host `id -u`/`id -g`; rebuild when the stamp differs, the UID/GID differ, the image is missing/unstamped, or `--force` is given. Resolve `$CLAUDE_PLUGIN_ROOT` fresh (no frozen cache path)
 
 ## 3. Surfacing (gate at use, three touchpoints)
 
@@ -17,7 +17,7 @@
 ## 4. Tests
 
 - [ ] 4.1 `make smoke-base`: assert the baked `LABEL` and `/etc/ralph-base.version` are present and equal to `base_version.sh` over the source (image-contents coverage; CI does not build the image)
-- [ ] 4.2 Add `base/tests/test_base_freshness.sh`: unit-test the idempotent-skip + drift decision by stubbing `podman image inspect` (matching vs differing vs missing/unstamped stamp); assert skip-when-current, rebuild-when-stale, and force-always. Wire into `base/tests/run.sh` + the CLAUDE.md single-slice list
+- [ ] 4.2 Add `base/tests/test_base_freshness.sh`: unit-test the idempotent-skip + drift decision by stubbing `podman image inspect` (matching vs differing vs missing/unstamped stamp, AND matching-stamp-but-mismatched-UID/GID); assert skip-when-current, rebuild-when-stale, rebuild-on-UID/GID-mismatch, and force-always. Wire into `base/tests/run.sh` + the CLAUDE.md single-slice list
 - [ ] 4.3 Extend `base/tests/test_conformance.sh`: a structural check that the stamp/hash computation is single-sourced in `base_version.sh` and not re-implemented in the `Makefile`/skills/runner (the same single-source discipline the gate command follows)
 - [ ] 4.4 Runner test (`base/tests/test_ralph_runner.sh`): a turn's startup narration includes a `base-version:` line (pointing the override at a fixture file asserts the real value; absent → "unknown")
 

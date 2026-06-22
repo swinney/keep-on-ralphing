@@ -15,19 +15,25 @@ treated as "unknown — rebuild recommended", never as an error.
 - **AND** rebuilding from unchanged sources yields the same stamp, while changing a runner source yields a different stamp
 
 #### Scenario: A legacy unstamped image is not an error
-- **WHEN** a reader inspects a base image built before stamping existed (no stamp present)
-- **THEN** it reports the runner version as unknown and recommends a rebuild, rather than failing
+- **WHEN** a reader inspects a base image built before stamping existed (no provenance stamp present)
+- **THEN** it reports the provenance stamp as absent (unknown) and recommends a rebuild, rather than failing
 
 ### Requirement: The base-image rebuild is freshness-aware and idempotent
 
-The rebuild affordance SHALL compute the stamp of the currently bundled `base/` and compare it to the stamp
-baked into the existing `ralph-base:v1`; it SHALL rebuild only when they differ, when the image is missing or
-unstamped, or when a force option is given, and SHALL otherwise report the image is already current and skip
-the build. Running it when the image is already current MUST NOT perform a wasteful rebuild.
+The rebuild affordance SHALL treat the image as current only when BOTH the baked provenance stamp matches the
+currently bundled `base/` AND the baked host UID/GID match the invoking host's `id -u`/`id -g` (the build
+bakes UID/GID for bind-mount ownership, so a stamp match alone does not guarantee the image is correct for
+this machine). It SHALL rebuild when the stamp differs, the baked UID/GID differ from the host, the image is
+missing/unstamped, or a force option is given; otherwise it SHALL report the image is already current and
+skip the build. Running it when the image is already current MUST NOT perform a wasteful rebuild.
 
 #### Scenario: Re-running when already current skips the build
-- **WHEN** the operator triggers the rebuild and the baked stamp matches the currently bundled `base/`
+- **WHEN** the operator triggers the rebuild, the baked stamp matches the currently bundled `base/`, AND the baked UID/GID match the host
 - **THEN** the affordance reports the image is already current and does not rebuild
+
+#### Scenario: A UID/GID mismatch forces a rebuild even when the stamp matches
+- **WHEN** the baked provenance stamp matches the bundled `base/` but the baked UID/GID differ from the invoking host's `id -u`/`id -g`
+- **THEN** the affordance rebuilds (a stamp-only "current" verdict would otherwise reintroduce the bind-mount ownership bug the UID/GID matching prevents)
 
 #### Scenario: Running when stale rebuilds
 - **WHEN** the baked stamp differs from the currently bundled `base/` (e.g. after a plugin update that changed the runner), or the image is missing/unstamped

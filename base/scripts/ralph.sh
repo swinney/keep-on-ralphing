@@ -95,6 +95,15 @@ limit_poll=${RALPH_LIMIT_POLL:-900}
 tasks_file=${RALPH_TASKS:-tasks.md}
 state_dir=${RALPH_STATE_DIR:-.ralph}
 poll_interval=${RALPH_POLL_INTERVAL:-30}
+# Outbound notification seam: a pluggable command the RUNNER invokes as
+# `<cmd> <event> <reason>` at every needs-human halt. Empty = off (opt-in; no
+# notification side effects when unset). Plain ${VAR:-default} reads suffice —
+# the env-over-conf snapshot at the top already gives these precedence. bash 3.2-safe.
+notify_cmd=${RALPH_NOTIFY_CMD:-}
+notify_timeout=${RALPH_NOTIFY_TIMEOUT:-30}
+# The file the PROMPT contract has the agent write when it hits a decision the
+# specs don't cover; a NEW entry mid-run is a blocked-stop signal (like STATUS.md).
+questions_file=${RALPH_QUESTIONS:-docs/questions.md}
 # Aggregate log: a single append-only tail target (runner narration + agent
 # output, turn-prefixed) for an external aggregator. On by default; =0 reproduces
 # the pre-feature behaviour exactly. See the Vector recipe in docs/.
@@ -155,6 +164,15 @@ fi
 model_args=()
 [ -n "${RALPH_MODEL:-}" ] && model_args=(--model "$RALPH_MODEL")
 
+# Validate the optional notifier up front (independent of the review gate — it
+# fires at the stall/stop/blocked halts too, which run with the gate off). Mirror
+# the RALPH_REVIEWER check: a configured-but-unrunnable notifier refuses to start
+# rather than failing silently at a halt, when the operator most needs the ping.
+if [ -n "$notify_cmd" ] && ! command -v "$notify_cmd" >/dev/null 2>&1 && [ ! -x "$notify_cmd" ]; then
+  echo "ralph: RALPH_NOTIFY_CMD='$notify_cmd' is not executable — refusing to start" >&2
+  exit 1
+fi
+
 head_rev() { git rev-parse HEAD 2>/dev/null || echo none; }
 
 # Append one line to the aggregate live.log, turn-prefixed and timestamped to
@@ -172,6 +190,29 @@ _live_append() {
 narrate() {
   echo "$@"
   _live_append "$@"
+}
+
+# Collapse multi-line text (read from stdin) to a single trimmed line, so a halt
+# reason drawn from STATUS.md / questions.md is one clean line for a notification.
+oneline() { tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'; }
+
+# Fire the operator notifier at a needs-human halt: RALPH_NOTIFY_CMD invoked as
+# `<cmd> <event> <reason>` under a short timeout. NON-FATAL by contract — a
+# notifier that errors, hangs, or is slow is killed/ignored and never changes the
+# loop's exit code or control flow (the caller exits with its own explicit code
+# regardless). The `-k 2` mirrors the turn invocation: after $notify_timeout we
+# send TERM, then KILL 2s later, so even a SIGTERM-ignoring notifier cannot stall
+# the halt beyond a bounded window. No-op with no side effects when
+# RALPH_NOTIFY_CMD is unset. The RUNNER calls this; the agent never does.
+notify_human() {
+  [ -n "$notify_cmd" ] || return 0
+  local event="$1" reason="$2"
+  if timeout -k 2 "$notify_timeout" "$notify_cmd" "$event" "$reason" >/dev/null 2>&1; then
+    narrate "ralph: notified operator — event=$event"
+  else
+    narrate "ralph: notifier failed (event=$event) — non-fatal, loop unaffected"
+  fi
+  return 0
 }
 
 # The first unchecked tasks.md task (what the upcoming turn should pick up).
@@ -201,6 +242,11 @@ rec = {
     "committed": os.environ.get("RJ_COMMITTED") == "1",
     "sha": opt("RJ_SHA"),
     "subject": opt("RJ_SUBJECT"),
+    # Persisted blocked-question signal: a one-shot reader (/ralph-status) cannot
+    # tell a stale questions.md from one written this run, so the runner records
+    # its decision here instead of letting the reader re-derive it from the file.
+    "blocked": os.environ.get("RJ_BLOCKED") == "1",
+    "blocked_reason": opt("RJ_BLOCKED_REASON"),
 }
 if os.environ["RJ_MODE"] == "current":
     json.dump(rec, open(os.environ["RJ_STATE_DIR"] + "/current.json", "w"), indent=2)
@@ -443,6 +489,11 @@ fi
 # a CHANGE to non-whitespace content as a stop reason — a pre-existing breadcrumb
 # must not halt a fresh loop after a single turn.
 status_start="$(cat STATUS.md 2>/dev/null || true)"
+# Snapshot the questions file the same way: a blocked decision the agent writes
+# DURING the run is a stop signal, but a pre-existing list must NOT halt a fresh
+# loop after a single turn. Compared against this snapshot below (changed +
+# non-whitespace), exactly like STATUS.md.
+questions_start="$(cat "$questions_file" 2>/dev/null || true)"
 stalls=0
 while true; do
   before=$(head_rev)
@@ -476,7 +527,32 @@ while true; do
     narrate "ralph: STATUS.md updated with a stop reason at turn $turn — stopping"
     echo "--- STATUS.md ---"
     cat STATUS.md
+    notify_human stop "$(printf '%s' "$status_now" | oneline)"
     exit 0
+  fi
+
+  # Blocked-question immediate stop. A turn appended a NEW entry to the questions
+  # file (a decision the specs don't cover) and made no commit: treat it like a
+  # STATUS.md stop — halt now with a `blocked` signal — instead of letting it burn
+  # turns toward RALPH_MAX_STALLS with no signal. Mirrors the STATUS.md rule
+  # (changed + non-whitespace). Ordered AFTER the usage-limit pause and STATUS.md
+  # check but BEFORE the stall counter, and gated on a no-commit turn, so it can
+  # never pre-empt a committing turn or be double-counted as a stall.
+  if [ "$before" = "$after" ]; then
+    questions_now="$(cat "$questions_file" 2>/dev/null || true)"
+    if [ -n "${questions_now//[[:space:]]/}" ] && [ "$questions_now" != "$questions_start" ]; then
+      q_reason=$(grep -v '^[[:space:]]*$' "$questions_file" 2>/dev/null | tail -1 | oneline)
+      printf 'Loop halted: blocked on a question in %s — human decision needed.\n' "$questions_file" >STATUS.md
+      # Persist the decision so /ralph-status can report blocked WITHOUT re-reading
+      # the file (it cannot tell a stale list from a current one).
+      RJ_TURN="$turn" RJ_STATE="blocked" RJ_BLOCKED=1 RJ_BLOCKED_REASON="$q_reason" \
+        RJ_ENDED="$(date -Is)" emit_status current
+      narrate "ralph: blocked on a question in $questions_file at turn $turn — stopping (not a stall)"
+      echo "--- $questions_file ---"
+      cat "$questions_file"
+      notify_human blocked "$q_reason"
+      exit 1
+    fi
   fi
 
   # Outer-loop review gate: only when enabled AND this turn committed (there is
@@ -488,6 +564,7 @@ while true; do
       narrate "ralph: review gate exhausted its rounds at turn $turn — wrote STATUS.md, stopping"
       echo "--- STATUS.md ---"
       cat STATUS.md
+      notify_human review-exhausted "$(cat STATUS.md 2>/dev/null | oneline)"
       exit 1
     fi
   fi
@@ -499,6 +576,7 @@ while true; do
       printf 'Loop halted: %d consecutive turns made no commit (last exit %d — hung/timed-out or stuck-on-red). Human review needed.\n' \
         "$stalls" "$turn_ec" >STATUS.md
       narrate "ralph: ${stalls} consecutive no-progress turns — wrote STATUS.md, stopping"
+      notify_human stall "$(cat STATUS.md 2>/dev/null | oneline)"
       exit 1
     fi
   else

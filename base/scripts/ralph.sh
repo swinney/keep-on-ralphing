@@ -387,7 +387,11 @@ run_review_gate() {
     review_rounds=0
     narrate "ralph: review-gate PASS on PR #$num (clean review, CI green)"
     if [ "${RALPH_AUTO_MERGE:-0}" = 1 ]; then
-      merge_pr "$num" && narrate "ralph: auto-merged PR #$num into $(base_branch)"
+      if merge_pr "$num"; then
+        narrate "ralph: auto-merged PR #$num into $(base_branch)"
+      else
+        narrate "ralph: auto-merge FAILED for PR #$num — left for a human (check gh auth / branch protection)"
+      fi
     else
       narrate "ralph: PR #$num is ready for a human to merge (RALPH_AUTO_MERGE off)"
     fi

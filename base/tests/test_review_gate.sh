@@ -55,6 +55,7 @@ new_gate_ws() {
   # Scripted gh state (per-scenario overridable).
   : >"$STUB/pr_number"   # empty -> `pr view` reports "no PR" until `pr create`
   echo 0 >"$STUB/ci_exit" # gh pr checks exit: 0=pass, 8=pending, other=fail
+  echo 0 >"$STUB/merge_exit" # gh pr merge exit: 0=merged, other=merge failed
   : >"$STUB/findings"     # reviewer findings, one per line (empty = clean)
   : >"$STUB/gh.log"
 
@@ -85,7 +86,7 @@ case "\$*" in
   *"pr create"*) echo 1 >"$STUB/pr_number"; exit 0 ;;
   *"pr edit"*) exit 0 ;;
   *"pr checks"*) exit "\$(cat "$STUB/ci_exit" 2>/dev/null || echo 0)" ;;
-  *"pr merge"*) exit 0 ;;
+  *"pr merge"*) exit "\$(cat "$STUB/merge_exit" 2>/dev/null || echo 0)" ;;
   *) exit 0 ;;
 esac
 STUBEOF
@@ -328,6 +329,27 @@ RALPH_ARGS="" run_gate RALPH_AUTO_MERGE=1 >/dev/null 2>&1
 grep -q "auto-merged PR" "$WS/.ralph/log/live.log" 2>/dev/null \
   && ok "review-gate auto-merge disposition is captured in live.log" \
   || bad "auto-merge disposition line missing from live.log (stdout-only echo?)"
+cleanup
+
+# --- 15. a FAILED auto-merge is surfaced, not swallowed (Copilot #7 finding) -
+# `merge_pr && narrate` would skip the disposition entirely on a merge failure,
+# leaving operators with PASS and no outcome. The failure must be narrated.
+new_gate_ws
+echo 1 >"$STUB/merge_exit" # gh pr merge fails
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+RALPH_ARGS="" run_gate RALPH_AUTO_MERGE=1 >/dev/null 2>&1
+grep -qi "auto-merge FAILED" "$WS/.ralph/log/live.log" 2>/dev/null \
+  && ok "a failed auto-merge is surfaced in live.log, not silently swallowed" \
+  || bad "failed auto-merge produced no disposition line (swallowed by merge_pr && narrate?)"
+grep -q "auto-merged PR" "$WS/.ralph/log/live.log" 2>/dev/null \
+  && bad "a failed merge must NOT report 'auto-merged'" \
+  || ok "a failed merge does not falsely report success"
 cleanup
 
 echo

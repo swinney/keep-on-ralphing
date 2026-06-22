@@ -363,10 +363,10 @@ run_review_gate() {
   REVIEW_GATE_HALT=0
   local num status waited findings
   git push -u origin "$(working_branch)" >/dev/null 2>&1 ||
-    echo "ralph: review-gate could not push $(working_branch) to origin — check GH_TOKEN / remote (the PR may review stale commits)"
+    narrate "ralph: review-gate could not push $(working_branch) to origin — check GH_TOKEN / remote (the PR may review stale commits)"
   num=$(ensure_pr)
   if [ -z "$num" ]; then
-    echo "ralph: review-gate could not resolve a PR for $(working_branch) — skipping this turn"
+    narrate "ralph: review-gate could not resolve a PR for $(working_branch) — skipping this turn"
     return 0
   fi
 
@@ -387,9 +387,13 @@ run_review_gate() {
     review_rounds=0
     narrate "ralph: review-gate PASS on PR #$num (clean review, CI green)"
     if [ "${RALPH_AUTO_MERGE:-0}" = 1 ]; then
-      merge_pr "$num" && echo "ralph: auto-merged PR #$num into $(base_branch)"
+      if merge_pr "$num"; then
+        narrate "ralph: auto-merged PR #$num into $(base_branch)"
+      else
+        narrate "ralph: auto-merge FAILED for PR #$num — left for a human (check gh auth / branch protection)"
+      fi
     else
-      echo "ralph: PR #$num is ready for a human to merge (RALPH_AUTO_MERGE off)"
+      narrate "ralph: PR #$num is ready for a human to merge (RALPH_AUTO_MERGE off)"
     fi
     return 0
   fi

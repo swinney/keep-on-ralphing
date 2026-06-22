@@ -12,9 +12,10 @@ of outbound observability, complementing the WATCH half (`log-streaming`).
 ## What Changes
 
 - **`RALPH_NOTIFY_CMD` seam (runner).** A pluggable notifier command, mirroring `RALPH_REVIEWER`:
-  invoked as `<cmd> <event> <one-line-reason>`. Default **empty = off** (opt-in; behavior byte-identical
-  when unset). Startup-validated for executability when set. The **runner** invokes it — the agent stays
-  GitHub/network-blind.
+  invoked as `<cmd> <event> <one-line-reason>`. Default **empty = off** (opt-in; **no notification side
+  effects** when unset — see the blocked-question item below for the one intended control-flow change that
+  is independent of this seam). Startup-validated for executability when set. The **runner** invokes it —
+  the agent stays GitHub/network-blind.
 - **Notify at every needs-human exit.** A `notify_human <event> <reason>` helper fires at the three halt
   sites — review gate exhausted (`review-exhausted`), `RALPH_MAX_STALLS` reached (`stall`), and the agent
   wrote a stop reason (`stop`) — carrying the one-line `STATUS.md` reason. The notifier is **non-fatal**:

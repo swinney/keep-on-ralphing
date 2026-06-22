@@ -86,9 +86,26 @@ noise.
 - **`questions.md` false-positive stops** (a pre-existing list) → startup snapshot + changed-non-whitespace
   rule, identical to `STATUS.md` (D4); covered by a "pre-existing list does not stop" test.
 - **Detection drift between `ralph.sh` and `ralph-status`** → document the new duplicated pair alongside
-  the existing `STATUS.md` note in CLAUDE.md; keep both rules byte-aligned.
+  the existing `STATUS.md` note in CLAUDE.md; keep both rules byte-aligned. *Caveat for `/ralph-status`:*
+  the runner's blocked detection relies on a shell-local startup snapshot, which a one-shot status reader
+  does not have — so it cannot, from the file alone, distinguish a stale pre-existing `questions.md` from a
+  question appended during the current run. Therefore `/ralph-status` MUST NOT re-derive blocked state by
+  reading `questions.md` directly. If it surfaces blocked state at all (optional, task 6.4), it MUST read a
+  signal the runner *persisted* into `RALPH_STATE_DIR` (e.g. the snapshot or the blocked decision recorded
+  in `status.jsonl`/`current.json`); otherwise it MUST NOT classify questions at all. This avoids
+  false-reporting exactly the pre-existing-list case the runner is built to ignore.
 - **Notifier leaks secrets in args** (a webhook URL on a command line) → the recipe keeps the secret in
   `SLACK_WEBHOOK_URL` (env), not in `RALPH_NOTIFY_CMD`; document this.
+- **Notifier secret reachable in the agent's env** → the runner runs *in* the container and invokes the
+  notifier there, so `SLACK_WEBHOOK_URL`/`RALPH_NOTIFY_CMD` must be present in the container env, where the
+  `claude` turn (started from the inherited env, no scrub) can read them. This is the **same exposure plane
+  as the already-forwarded `GH_TOKEN`** (the consumer Makefile forwards it via `-e GH_TOKEN` today), so it
+  introduces no new *class* of exposure: "agent-blind" is a behavioral contract (the runner owns all
+  git/gh/network work, the agent does not), not env isolation. The recipe SHALL therefore treat the
+  webhook as a runner-plane secret of the same sensitivity as `GH_TOKEN` and document it as such. Full
+  env-isolation of the agent turn (scrubbing runner-only secrets before exec) is a broader hardening that
+  would also cover `GH_TOKEN` and is **explicitly out of scope** for this change — calling it out here so
+  it is a recorded decision, not an oversight.
 - **Two-channel release friction** → runner change reaches a loop only after a base rebuild; tasks call
   out the `plugin.json` bump + rebuild.
 

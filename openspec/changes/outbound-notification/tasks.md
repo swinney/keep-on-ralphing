@@ -21,6 +21,7 @@
 - [ ] 4.1 Add `RALPH_QUESTIONS` (default `docs/questions.md`); snapshot it at startup exactly like `STATUS.md` (`status_start` analogue)
 - [ ] 4.2 After a turn, if `RALPH_QUESTIONS` changed to a non-whitespace value AND the turn made no commit, stop immediately + `notify_human blocked "<new question summary>"` + exit — ordered AFTER the usage-limit pause and `STATUS.md` check but BEFORE the stall counter, so it is never also counted as a stall
 - [ ] 4.3 A pre-existing question list (unchanged during the run) must NOT trigger a blocked stop
+- [ ] 4.4 On a blocked stop, persist the decision into `RALPH_STATE_DIR` (e.g. a `blocked` field in the final `status.jsonl`/`current.json` record) so a later one-shot reader (`/ralph-status`, task 6.4) can report it without re-deriving from `docs/questions.md` — the file alone cannot tell a stale list from a current one
 
 ## 5. Tests pass (non-fatal + no-op are the critical cases)
 
@@ -32,9 +33,9 @@
 ## 6. Config, docs, and skill
 
 - [ ] 6.1 Document `RALPH_NOTIFY_CMD` (and `RALPH_QUESTIONS`) in `templates/ralph.conf.example`, default off/`docs/questions.md`; keep `example/` in sync
-- [ ] 6.2 Add `docs/recipes/slack-notify.md`: a `curl`-to-incoming-webhook script (secret in `SLACK_WEBHOOK_URL`, not on the command line), wired via `RALPH_NOTIFY_CMD`; note the zero-dep `gh pr comment` alternative; link from README
+- [ ] 6.2 Add `docs/recipes/slack-notify.md`: a `curl`-to-incoming-webhook script (secret in `SLACK_WEBHOOK_URL`, not on the command line), wired via `RALPH_NOTIFY_CMD`; note the zero-dep `gh pr comment` alternative; link from README. Document that the webhook is a **runner-plane secret reachable in the agent's container env (same plane as `GH_TOKEN`)** — agent-blind is behavioral, not env-isolation — so it should carry the same sensitivity as `GH_TOKEN`
 - [ ] 6.3 Update `CLAUDE.md`: document the notify seam + the NEW duplicated `questions.md` change-detection pair (ralph.sh ↔ ralph-status), alongside the existing `STATUS.md` invariant note
-- [ ] 6.4 (Decide per design Open Questions) Optionally have `skills/ralph-status/SKILL.md` report whether notifications are configured and surface a blocked-question state
+- [ ] 6.4 (Decide per design Open Questions) Optionally have `skills/ralph-status/SKILL.md` report whether notifications are configured and surface a blocked-question state — but ONLY by reading a runner-persisted signal in `RALPH_STATE_DIR` (see 4.4), never by re-reading `docs/questions.md` directly (a one-shot reader cannot distinguish a stale pre-existing list from a current one); if no such signal exists, `/ralph-status` MUST NOT classify questions
 
 ## 7. Release and validation
 

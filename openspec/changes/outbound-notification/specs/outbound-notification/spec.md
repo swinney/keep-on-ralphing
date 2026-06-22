@@ -5,8 +5,10 @@
 The runner SHALL invoke an operator-configured notifier command (`RALPH_NOTIFY_CMD`) at every transition
 where the loop stops and a human is needed, passing an event identifier and a one-line reason. The
 notifier SHALL be invoked by the runner, never by the in-container agent (the agent stays
-GitHub/network-blind). When `RALPH_NOTIFY_CMD` is unset, the runner SHALL NOT notify and SHALL behave
-exactly as before.
+GitHub/network-blind). When `RALPH_NOTIFY_CMD` is unset, the runner SHALL NOT notify and SHALL produce
+no notification side effects. (This no-op guarantee is scoped to notification only; the blocked-question
+immediate-stop behavior below is an independent, intended control-flow change that applies whether or not
+`RALPH_NOTIFY_CMD` is set.)
 
 #### Scenario: Review gate exhausts its rounds
 - **WHEN** the review gate halts after its bounded rounds and `RALPH_NOTIFY_CMD` is set
@@ -21,8 +23,8 @@ exactly as before.
 - **THEN** the runner invokes the notifier with a `stop` event and the one-line stop reason
 
 #### Scenario: No notifier configured
-- **WHEN** `RALPH_NOTIFY_CMD` is unset and the loop halts for any reason
-- **THEN** the runner does not invoke any notifier and its exit code and behavior are unchanged from today
+- **WHEN** `RALPH_NOTIFY_CMD` is unset and the loop halts
+- **THEN** the runner does not invoke any notifier and produces no notification side effects, and its exit code and control flow are identical to today *except* for the independent blocked-question immediate-stop behavior specified below (which does not depend on the notifier)
 
 ### Requirement: The notifier seam is pluggable and notifier-agnostic
 

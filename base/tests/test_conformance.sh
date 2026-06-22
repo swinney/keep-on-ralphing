@@ -46,23 +46,38 @@ tracked() { git ls-files "$@"; }
 # log-streaming requires every runner orchestration line (incl. a stall/halt
 # message) to reach live.log, not only the terminal. An operator line — an
 # `echo`/`printf` emitting a "ralph:" message, any quoting — must route to
-# live.log: via narrate (which is not echo/printf, so never a candidate here), a
-# `| tee` to the per-turn log, or a same-line `_live_append`. Pre-loop
-# refuse-to-start lines write to stderr (`>&2`) before live.log exists and are
-# exempt. Routing tokens are matched in command position (`| tee`, `_live_append "`)
-# so a mere mention in a trailing comment does NOT grant a false exemption.
+# live.log: via narrate (not echo/printf, so never a candidate here), a `| tee`
+# to the per-turn log, or a same-line `_live_append`. The exception is a pre-loop
+# refuse-to-start line written to stderr (`>&2`) BEFORE the loop (live.log does
+# not exist yet). Each candidate has its trailing comment stripped first, so a
+# routing token merely MENTIONED in a comment cannot grant a false exemption; the
+# `>&2` exemption is gated on being before the main loop (a loop-body `>&2`
+# reaches the terminal, not live.log, so it is NOT exempt).
 runner="base/scripts/ralph.sh"
 if [ ! -f "$runner" ]; then
   bad "live.log narration: runner $runner not found (renamed? this check would otherwise pass vacuously)"
 else
-  narration_violations=$(
-    grep -nE '(echo|printf)[^|]*ralph:' "$runner" | grep -vE '>&2|\| *tee|_live_append "' || true
-  )
+  loop_line=$(grep -nE '^while true; do' "$runner" | head -1 | cut -d: -f1)
+  loop_line=${loop_line:-0}
+  narration_violations=""
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    ln=${entry%%:*}
+    code=$(printf '%s' "${entry#*:}" | sed 's/[[:space:]]#.*$//') # strip trailing comment
+    # routed to live.log (command position): a tee pipeline or an _live_append call (any quoting)
+    printf '%s' "$code" | grep -qE '\| *tee|_live_append ' && continue
+    # pre-loop refuse-to-start to stderr is exempt; a loop-body >&2 is NOT
+    if printf '%s' "$code" | grep -q '>&2' && [ "$ln" -lt "$loop_line" ]; then continue; fi
+    narration_violations="${narration_violations}${ln}: ${entry#*:}
+"
+  done <<EOF
+$(grep -nE '(echo|printf)[^|]*ralph:' "$runner")
+EOF
   if [ -z "$narration_violations" ]; then
-    ok "live.log narration: every echo/printf 'ralph:' line routes via narrate/_live_append/tee (or >&2 pre-loop)"
+    ok "live.log narration: every echo/printf 'ralph:' line routes via narrate/_live_append/tee (or pre-loop >&2)"
   else
     bad "live.log narration: operator line(s) bypass live.log (route via narrate or _live_append):"
-    printf '%s\n' "$narration_violations" | sed "s#^#      $runner:#"
+    printf '%s' "$narration_violations" | sed "s#^#      $runner:#"
   fi
 fi
 
@@ -81,7 +96,10 @@ while IFS= read -r gate; do
     *) pdir=$(dirname "$gate") ;;                              # templates/gate.sh.template -> templates
   esac
   sibs="$pdir/Containerfile $pdir/Makefile $pdir/Containerfile.template $pdir/Makefile.template"
-  for ci in "$pdir"/.github/workflows/*.yml "$pdir"/.github/workflows/*.yaml; do
+  # CI workflows: the example keeps a real .github/workflows/, the templates ship a
+  # flat ci.yml.template (the shipped CI source) — scan both shapes.
+  for ci in "$pdir"/.github/workflows/*.yml "$pdir"/.github/workflows/*.yaml \
+    "$pdir"/ci.yml.template "$pdir"/ci.yaml.template "$pdir"/ci.yml "$pdir"/ci.yaml; do
     [ -f "$ci" ] && sibs="$sibs $ci"
   done
   while IFS= read -r raw; do
@@ -112,7 +130,11 @@ fi
 tpl_keys=$(grep -oE '^RALPH_[A-Z_]+=' templates/ralph.conf.example 2>/dev/null | sort -u)
 ex_keys=$(grep -oE '^RALPH_[A-Z_]+=' example/ralph.conf 2>/dev/null | sort -u)
 key_diff=$(comm -3 <(printf '%s\n' "$tpl_keys") <(printf '%s\n' "$ex_keys") | sed 's/[[:space:]]//g' | grep -v '^$' || true)
-if [ -z "$key_diff" ]; then
+if [ ! -f templates/ralph.conf.example ] || [ ! -f example/ralph.conf ]; then
+  bad "example parity: a conf file is missing (templates/ralph.conf.example or example/ralph.conf) — cannot compare"
+elif [ -z "$tpl_keys" ] || [ -z "$ex_keys" ]; then
+  bad "example parity: no RALPH_ keys found in one of the conf files — the check would be vacuous"
+elif [ -z "$key_diff" ]; then
   ok "example parity: example/ralph.conf and templates/ralph.conf.example carry the same key set"
 else
   bad "example parity: key set differs between templates/ and example/: $(printf '%s' "$key_diff" | tr '\n' ' ')"

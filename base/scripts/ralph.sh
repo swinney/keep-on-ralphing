@@ -165,12 +165,22 @@ model_args=()
 [ -n "${RALPH_MODEL:-}" ] && model_args=(--model "$RALPH_MODEL")
 
 # Validate the optional notifier up front (independent of the review gate — it
-# fires at the stall/stop/blocked halts too, which run with the gate off). Mirror
-# the RALPH_REVIEWER check: a configured-but-unrunnable notifier refuses to start
-# rather than failing silently at a halt, when the operator most needs the ping.
-if [ -n "$notify_cmd" ] && ! command -v "$notify_cmd" >/dev/null 2>&1 && [ ! -x "$notify_cmd" ]; then
-  echo "ralph: RALPH_NOTIFY_CMD='$notify_cmd' is not executable — refusing to start" >&2
-  exit 1
+# fires at the stall/stop/blocked halts too, which run with the gate off): a
+# configured-but-unrunnable notifier refuses to start rather than failing silently
+# at a halt, when the operator most needs the ping. Unlike RALPH_REVIEWER (invoked
+# directly in the shell, so a builtin/function is fine), the notifier is exec'd via
+# `timeout` — a real executable FILE — so a bare `command -v` (which also accepts
+# builtins/functions/aliases) is too lax: resolve the actual exec target and
+# require it to be an -x file, or it would only fail at halt-time.
+if [ -n "$notify_cmd" ]; then
+  case "$notify_cmd" in
+    */*) notify_exe="$notify_cmd" ;;                          # explicit path -> use as-is
+    *)   notify_exe=$(command -v "$notify_cmd" 2>/dev/null) ;; # bare name -> PATH lookup
+  esac
+  if [ -z "$notify_exe" ] || [ ! -x "$notify_exe" ]; then
+    echo "ralph: RALPH_NOTIFY_CMD='$notify_cmd' is not an executable file — refusing to start" >&2
+    exit 1
+  fi
 fi
 
 head_rev() { git rev-parse HEAD 2>/dev/null || echo none; }
@@ -253,6 +263,28 @@ if os.environ["RJ_MODE"] == "current":
 else:
     with open(os.environ["RJ_STATE_DIR"] + "/status.jsonl", "a") as f:
         f.write(json.dumps(rec) + "\n")
+PY
+}
+
+# Merge a blocked-question decision INTO the heartbeat current.json that run_turn
+# just wrote, rather than overwriting it: a full emit_status mode=current write
+# here would reset task/model/started/exit_code/sha to defaults (it builds the
+# record fresh from RJ_* vars, which the main loop doesn't have), clobbering the
+# very fields /ralph-status reads. So layer only state/blocked/blocked_reason onto
+# the existing record. No-op without python3 (consistent with emit_status).
+persist_blocked() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  RJ_STATE_DIR="$state_dir" RJ_BLOCKED_REASON="$1" python3 - <<'PY' 2>/dev/null || true
+import json, os
+p = os.environ["RJ_STATE_DIR"] + "/current.json"
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {}
+d["state"] = "blocked"
+d["blocked"] = True
+d["blocked_reason"] = os.environ.get("RJ_BLOCKED_REASON") or None
+json.dump(d, open(p, "w"), indent=2)
 PY
 }
 
@@ -489,14 +521,17 @@ fi
 # a CHANGE to non-whitespace content as a stop reason — a pre-existing breadcrumb
 # must not halt a fresh loop after a single turn.
 status_start="$(cat STATUS.md 2>/dev/null || true)"
-# Snapshot the questions file the same way: a blocked decision the agent writes
-# DURING the run is a stop signal, but a pre-existing list must NOT halt a fresh
-# loop after a single turn. Compared against this snapshot below (changed +
-# non-whitespace), exactly like STATUS.md.
-questions_start="$(cat "$questions_file" 2>/dev/null || true)"
 stalls=0
 while true; do
   before=$(head_rev)
+  # Snapshot the questions file PER TURN, not once at startup. Unlike STATUS.md
+  # (which stops on any change, committed or not), the blocked check is gated on a
+  # NO-COMMIT turn — so a startup snapshot would go stale the moment a question is
+  # added on a COMMITTING turn, and the next unrelated no-commit turn would then
+  # falsely halt as blocked. Comparing this-turn-before vs after detects only a
+  # question the agent wrote DURING this turn; a pre-existing list is unchanged
+  # across the turn and so is naturally ignored.
+  questions_before="$(cat "$questions_file" 2>/dev/null || true)"
   run_turn
   after=$(head_rev)
 
@@ -531,22 +566,22 @@ while true; do
     exit 0
   fi
 
-  # Blocked-question immediate stop. A turn appended a NEW entry to the questions
-  # file (a decision the specs don't cover) and made no commit: treat it like a
-  # STATUS.md stop — halt now with a `blocked` signal — instead of letting it burn
-  # turns toward RALPH_MAX_STALLS with no signal. Mirrors the STATUS.md rule
-  # (changed + non-whitespace). Ordered AFTER the usage-limit pause and STATUS.md
-  # check but BEFORE the stall counter, and gated on a no-commit turn, so it can
-  # never pre-empt a committing turn or be double-counted as a stall.
+  # Blocked-question immediate stop. THIS turn appended a NEW entry to the questions
+  # file (a decision the specs don't cover) and made no commit: halt now with a
+  # `blocked` signal instead of letting it burn turns toward RALPH_MAX_STALLS with
+  # no signal. Compared against this turn's pre-run snapshot (changed + non-whitespace),
+  # ordered AFTER the usage-limit pause and STATUS.md check but BEFORE the stall
+  # counter, and gated on a no-commit turn, so it can never pre-empt a committing
+  # turn or be double-counted as a stall.
   if [ "$before" = "$after" ]; then
     questions_now="$(cat "$questions_file" 2>/dev/null || true)"
-    if [ -n "${questions_now//[[:space:]]/}" ] && [ "$questions_now" != "$questions_start" ]; then
+    if [ -n "${questions_now//[[:space:]]/}" ] && [ "$questions_now" != "$questions_before" ]; then
       q_reason=$(grep -v '^[[:space:]]*$' "$questions_file" 2>/dev/null | tail -1 | oneline)
       printf 'Loop halted: blocked on a question in %s — human decision needed.\n' "$questions_file" >STATUS.md
-      # Persist the decision so /ralph-status can report blocked WITHOUT re-reading
-      # the file (it cannot tell a stale list from a current one).
-      RJ_TURN="$turn" RJ_STATE="blocked" RJ_BLOCKED=1 RJ_BLOCKED_REASON="$q_reason" \
-        RJ_ENDED="$(date -Is)" emit_status current
+      # Persist the decision (merged into this turn's heartbeat) so /ralph-status can
+      # report blocked WITHOUT re-reading the file (it cannot tell a stale list from
+      # a current one).
+      persist_blocked "$q_reason"
       narrate "ralph: blocked on a question in $questions_file at turn $turn — stopping (not a stall)"
       echo "--- $questions_file ---"
       cat "$questions_file"

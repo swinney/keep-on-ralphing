@@ -200,9 +200,13 @@ grep -q '^event=stall' "$STUB/notify.log" \
   && bad "a blocked stop must NOT also fire a stall event" \
   || ok "blocked stop did not also fire a stall event"
 [ "$ec" -eq 1 ] && ok "blocked stop exits 1 (needs human)" || bad "blocked exit was $ec (want 1)"
-python3 -c "import json,sys;d=json.load(open('$WS/.ralph/current.json'));sys.exit(0 if d.get('blocked') else 1)" 2>/dev/null \
+python3 -c "import json,sys;d=json.load(open('$WS/.ralph/current.json'));sys.exit(0 if d.get('blocked') and d.get('state')=='blocked' else 1)" 2>/dev/null \
   && ok "blocked decision persisted to current.json (readable by /ralph-status)" \
   || bad "blocked state not persisted in current.json"
+# the blocked write must MERGE into the heartbeat, not clobber task/model/started.
+python3 -c "import json,sys;d=json.load(open('$WS/.ralph/current.json'));sys.exit(0 if d.get('task') and d.get('started') else 1)" 2>/dev/null \
+  && ok "blocked current.json keeps the heartbeat fields (task/started not clobbered)" \
+  || bad "blocked current.json clobbered the heartbeat (task/started lost)"
 cleanup
 
 # --- 5. a pre-existing questions.md does NOT trigger a blocked stop ---------
@@ -226,6 +230,32 @@ grep -q '^event=blocked' "$STUB/notify.log" \
 [ "$turns" -ge 2 ] \
   && ok "loop continued past a pre-existing question list (turns=$turns)" \
   || bad "loop stopped early on a pre-existing question (turns=$turns)"
+cleanup
+
+# --- 5b. a question added on a COMMITTING turn must not false-block a later turn
+new_ws
+rm -f "$WS/STATUS.md"
+# turn 1: append a question AND commit (real progress) — must NOT block.
+cat >"$STUB/count-1.sh" <<'S'
+mkdir -p docs
+printf -- '- A question raised alongside real progress?\n' >>docs/questions.md
+git add -A
+git commit -qm "work + note a question"
+S
+# turn 2: a plain no-commit stall that adds NO new question — must NOT block. (With
+# a stale startup snapshot, questions_now != questions_start would falsely fire it.)
+# turn 3: a clean stop.
+cat >"$STUB/count-3.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+S
+RALPH_ARGS="" run RALPH_NOTIFY_CMD="$STUB/bin/notify" RALPH_MAX_STALLS=5 >/dev/null 2>&1
+turns=$(cat "$WS/.ralph/turn")
+grep -q '^event=blocked' "$STUB/notify.log" \
+  && bad "a question added on a COMMITTING turn must not block a later unrelated turn" \
+  || ok "a committed question-write does not false-block a subsequent no-commit turn"
+[ "$turns" -ge 3 ] \
+  && ok "loop ran past the committed question-write to a real stop (turns=$turns)" \
+  || bad "loop halted early after a committed question-write (turns=$turns)"
 cleanup
 
 # --- 6. non-fatal: a failing + slow notifier never changes exit code/flow ---
@@ -276,8 +306,18 @@ cleanup
 new_ws
 RALPH_ARGS="--once" run RALPH_NOTIFY_CMD="/no/such/notifier" >/dev/null 2>&1
 [ $? -ne 0 ] \
-  && ok "a non-executable RALPH_NOTIFY_CMD refuses to start (mirrors RALPH_REVIEWER)" \
+  && ok "a non-executable RALPH_NOTIFY_CMD refuses to start" \
   || bad "a bad RALPH_NOTIFY_CMD should refuse to start"
+cleanup
+
+# --- 8b. a RALPH_NOTIFY_CMD that resolves to a shell builtin refuses ---------
+# `:` passes a bare `command -v`, but the notifier is exec'd via `timeout` (not a
+# shell), so a builtin would only fail at halt-time. Validation must reject it.
+new_ws
+RALPH_ARGS="--once" run RALPH_NOTIFY_CMD=":" >/dev/null 2>&1
+[ $? -ne 0 ] \
+  && ok "a builtin-only RALPH_NOTIFY_CMD (':') refuses to start (timeout needs a real file)" \
+  || bad "':' passed validation but would fail at halt-time under timeout"
 cleanup
 
 echo

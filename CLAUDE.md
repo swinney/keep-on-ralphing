@@ -212,15 +212,17 @@ both required in one release.
   must stay in sync. `STATUS.md` is both the stop signal *and* the human cold-start
   breadcrumb, so it is normally non-empty when a fresh loop starts — that is why the
   comparison is against a startup snapshot, not against emptiness.
-- **Blocked-question detection is deliberately ASYMMETRIC to `STATUS.md`** (do not "fix" it
-  into a duplicated pair). `ralph.sh` snapshots `RALPH_QUESTIONS` at startup and stops on a
-  changed non-whitespace value — the *same* rule as `STATUS.md` — but the `/ralph-status` skill
-  must **NOT** re-derive blocked state by reading the questions file: a one-shot reader cannot
-  tell a stale pre-existing list from one written this run. Instead the runner *persists* its
-  decision (`blocked` + `blocked_reason` in `current.json`) and the skill reads only that. So
-  the detection lives in exactly one place; the skill consumes a persisted signal, it does not
-  duplicate the rule. (`STATUS.md` is safe to duplicate because the skill only reports presence,
-  never *change*-since-startup.)
+- **Blocked-question detection is deliberately ASYMMETRIC to `STATUS.md`** in two ways — do not
+  "fix" either into the `STATUS.md` shape. (1) **Per-turn, not startup snapshot:** `ralph.sh`
+  snapshots `RALPH_QUESTIONS` at the *start of each turn* and stops only if THIS no-commit turn
+  changed it. A startup snapshot (the `STATUS.md` model) is WRONG here because the blocked check
+  is gated on a no-commit turn — a question added on a *committing* turn would leave a startup
+  snapshot stale and falsely halt a later unrelated no-commit turn. (2) **Detection lives once:**
+  the `/ralph-status` skill must **NOT** re-derive blocked state by reading the questions file (a
+  one-shot reader cannot tell a stale list from one written this run); the runner *persists* its
+  decision (`blocked` + `blocked_reason`, merged into `current.json` so the turn's other heartbeat
+  fields survive) and the skill reads only that. (`STATUS.md` can use a startup snapshot + be read
+  by both because its stop fires on any change and the skill only reports presence.)
 - **Config precedence is `environment > ralph.conf > built-in default`**, implemented by
   snapshotting `RALPH_*` env vars as re-runnable assignments and re-applying them *after*
   sourcing `ralph.conf`.

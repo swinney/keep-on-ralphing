@@ -55,14 +55,19 @@ or hang the exit — same principle as the review-gate "failed push is reported,
 continues." *Open:* whether to background it (`&`); leaning synchronous-with-timeout for simpler ordering
 and because halts are terminal anyway (no throughput cost).
 
-### D4 — `docs/questions.md` detection mirrors `STATUS.md` exactly
-Snapshot `docs/questions.md` at startup (like `status_start`); after a turn, if it changed to a
+### D4 — `docs/questions.md` detection is a PER-TURN diff (not a startup snapshot)
+Capture `docs/questions.md` at the *start of each turn*; after the turn, if it changed to a
 non-whitespace value AND the turn made no commit, stop immediately with a `blocked` notification. *Why
-mirror STATUS.md:* the kit already documents that STATUS.md change-detection is duplicated between
-`ralph.sh` and the `ralph-status` skill and they must stay in sync — `questions.md` adds a second such
-pair, so it must use the identical startup-snapshot rule to avoid a stale pre-existing list stopping a
-fresh loop. Path is pinned to `docs/questions.md` (what the PROMPT hardcodes); expose `RALPH_QUESTIONS`
-(default `docs/questions.md`) for the rare relocation, via the standard precedence.
+NOT a startup snapshot like `status_start`:* a startup snapshot works for `STATUS.md` because that stop
+fires on **any** change, committed or not — but the blocked check is gated on a **no-commit** turn. With
+a startup snapshot, a question added on a *committing* turn would leave the snapshot stale, and the next
+unrelated no-commit turn would then satisfy `now != startup` and falsely halt as `blocked`. Comparing
+this-turn-before vs after detects only a question the agent wrote *during this turn*; a pre-existing list
+(or a question committed earlier) is unchanged across a later turn and so is naturally ignored. Detection
+therefore lives in exactly one place (`ralph.sh`) — it is NOT duplicated into `ralph-status` (which
+consumes the persisted `blocked` signal instead; see Risks). Path is pinned to `docs/questions.md` (what
+the PROMPT hardcodes); expose `RALPH_QUESTIONS` (default `docs/questions.md`) for the rare relocation, via
+the standard precedence.
 
 ### D5 — Ordering of the new blocked-stop against existing checks
 Per iteration the order becomes: run turn → usage-limit pause (unchanged; replays, never a stall) →
@@ -83,8 +88,10 @@ noise.
 
 - **A slow/hanging notifier delays the halt** → run under a short `timeout`, status ignored (D3); a
   notifier that hangs is killed, the halt proceeds. Covered by a failing-notifier test.
-- **`questions.md` false-positive stops** (a pre-existing list) → startup snapshot + changed-non-whitespace
-  rule, identical to `STATUS.md` (D4); covered by a "pre-existing list does not stop" test.
+- **`questions.md` false-positive stops** (a pre-existing list, or a question added on an earlier
+  committing turn) → per-turn before/after diff + changed-non-whitespace + no-commit gate (D4); covered by
+  a "pre-existing list does not stop" test AND a "committed question-write does not false-block a later
+  turn" test.
 - **Detection drift between `ralph.sh` and `ralph-status`** → document the new duplicated pair alongside
   the existing `STATUS.md` note in CLAUDE.md; keep both rules byte-aligned. *Caveat for `/ralph-status`:*
   the runner's blocked detection relies on a shell-local startup snapshot, which a one-shot status reader

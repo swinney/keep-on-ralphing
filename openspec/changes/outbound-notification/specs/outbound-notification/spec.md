@@ -58,11 +58,14 @@ the runner's output, not propagated.
 
 ### Requirement: A blocked question stops the loop immediately and notifies
 
-The runner SHALL treat a changed `docs/questions.md` like a `STATUS.md` stop signal: it SHALL stop
-immediately and notify with a `blocked` event, rather than counting the no-commit turn toward
+The runner SHALL treat a question the agent writes during a no-commit turn as a stop signal: it SHALL
+stop immediately and notify with a `blocked` event, rather than counting the no-commit turn toward
 `RALPH_MAX_STALLS` and burning further turns. (`docs/questions.md` is the file the PROMPT contract tells
-the agent to write when it hits a decision the specs do not cover.) Detection SHALL mirror the
-`STATUS.md` rule — a startup snapshot, stopping only on a changed, non-whitespace value.
+the agent to write when it hits a decision the specs do not cover.) Detection SHALL compare the file
+against its content at the **start of the same turn** (a per-turn snapshot), stopping only when THIS turn
+changed it to a non-whitespace value on a no-commit turn. A startup-only snapshot SHALL NOT be used: the
+no-commit gate means an accumulated change from an earlier committing turn would otherwise falsely halt a
+later, unrelated no-commit turn.
 
 #### Scenario: The agent records a blocked question
 - **WHEN** a turn appends a new question to `docs/questions.md` and makes no commit
@@ -70,4 +73,8 @@ the agent to write when it hits a decision the specs do not cover.) Detection SH
 
 #### Scenario: A pre-existing question list does not stop a fresh loop
 - **WHEN** `docs/questions.md` already had content before the loop started and no new question is added
-- **THEN** the runner does not treat it as a blocked stop (only a change to non-whitespace content during the run does)
+- **THEN** the runner does not treat it as a blocked stop (only a change made during a turn does)
+
+#### Scenario: A question added on a committing turn does not falsely halt a later turn
+- **WHEN** a turn appends a question to `docs/questions.md` AND commits (so the blocked check is skipped), and a later, unrelated turn makes no commit without adding a new question
+- **THEN** the later turn is NOT treated as a blocked stop (detection is per-turn, not against the loop's startup snapshot)

@@ -17,8 +17,14 @@
 
 ## 4. review-gate: surface auto-merge failure (MODIFIED requirement)
 
-- [ ] 4.1 In `run_review_gate`, `narrate` on a failed `merge_pr` instead of swallowing it, and do NOT represent the PR as merged on failure (mirror the failed-push pattern)
-- [ ] 4.2 Test (`base/tests/test_review_gate.sh`): with `RALPH_AUTO_MERGE=1` and a stubbed failing `gh pr merge`, the failure is surfaced (and reaches `live.log`), not silently swallowed
+> The runner code + test for this landed in PR #7 (Copilot review found the
+> `merge_pr && narrate` short-circuit). At apply time 4.1/4.2 are verify-only —
+> confirm they are present on `main`. This change's unique contribution is the
+> MODIFIED `review-gate` spec requirement (`specs/review-gate/spec.md`) that pins it.
+
+- [ ] 4.1 (done in #7) Confirm `run_review_gate` narrates BOTH auto-merge outcomes and never reports a failed merge as merged
+- [ ] 4.2 (done in #7) Confirm `test_review_gate.sh` asserts a failing `gh pr merge` is surfaced to `live.log` and not falsely reported as merged
+- [ ] 4.3 Ensure the MODIFIED `review-gate` spec delta (auto-merge failure surfaced) matches the shipped behavior
 
 ## 5. Incumbent-impact convention (M6) + future path (M2)
 

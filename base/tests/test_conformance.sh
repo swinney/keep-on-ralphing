@@ -176,26 +176,37 @@ ex_manifest="example/.ralph-scaffold.json"
 if [ ! -f "$ex_manifest" ]; then
   bad "scaffold manifest: $ex_manifest is missing (the golden reference must carry it)"
 else
-  man_mismatch=$(cd example && python3 - <<'PY'
-import json, hashlib
-m = json.load(open(".ralph-scaffold.json"))
+  # Capture BOTH output and exit status: the script is not `set -e`, so a python
+  # failure (missing python3, malformed JSON, empty manifest) would otherwise yield
+  # an empty string and pass vacuously. Success requires rc==0 AND no mismatch lines;
+  # any non-zero rc (1=mismatch, 3=bad/empty manifest, 127=no python3) is a failure.
+  man_out=$(cd example && python3 - <<'PY' 2>&1
+import json, hashlib, sys
+try:
+    m = json.load(open(".ralph-scaffold.json"))
+except Exception as e:
+    print("cannot parse .ralph-scaffold.json: %s" % e); sys.exit(3)
+files = m.get("files", {})
+if not files:
+    print("manifest has no 'files' entries (would be vacuous)"); sys.exit(3)
 out = []
-for path, want in m.get("files", {}).items():
+for path, want in files.items():
     try:
         got = hashlib.sha256(open(path, "rb").read()).hexdigest()
     except OSError:
-        out.append(f"{path}: file missing")
-        continue
+        out.append(f"{path}: file missing"); continue
     if got != want:
         out.append(f"{path}: {got[:12]} != recorded {want[:12]}")
 print("\n".join(out))
+sys.exit(1 if out else 0)
 PY
 )
-  if [ -z "$man_mismatch" ]; then
+  man_rc=$?
+  if [ "$man_rc" -eq 0 ] && [ -z "$man_out" ]; then
     ok "scaffold manifest: example/.ralph-scaffold.json hashes match the example files"
   else
-    bad "scaffold manifest: example/.ralph-scaffold.json has drifted from the example files:"
-    printf '%s\n' "$man_mismatch" | sed 's/^/      /'
+    bad "scaffold manifest: example/.ralph-scaffold.json check failed (rc=$man_rc):"
+    printf '%s\n' "$man_out" | sed 's/^/      /'
   fi
 fi
 

@@ -46,6 +46,9 @@ Look for a scaffold provenance manifest at the repo root: **`.ralph-scaffold.jso
     this is the clean, precise path.
   - **Customized** (current != recorded): do NOT regenerate. Upgrade by **inserting only the missing
     blocks** and preserving the operator's edits (feature-detection, §3).
+  - **Not recorded** (a project file absent from the manifest's `files` — e.g. a file the last run omitted
+    because it was customized): treat it as manifest-absent for that file → **feature-detection** (insert-only,
+    preserve). Never regenerate a file that has no recorded baseline.
   A literal three-way merge is intentionally NOT attempted: the plugin bundles only the *current* templates,
   not the historical version the project scaffolded from, so the recorded hash (a "did the operator touch
   this?" signal) is what is reconstructable — and sufficient.
@@ -90,12 +93,22 @@ first** (so a substituted `{{PLACEHOLDER}}` does not show as a diff), then:
 
 **Write the scaffold manifest.** After a confirmed upgrade, **write/refresh `.ralph-scaffold.json`** at the
 repo root in the format from §2 — `{ "template_version": "<CURRENT plugin version>", "files": { "<path>":
-"<sha256>" } }` — recording a content hash (`sha256sum` / `shasum -a 256`) of each Ralph-owned config file
-*as it stands after the upgrade applies*. Set `template_version` to the **current** plugin version (the one
-you upgraded toward), not any stale value a prior manifest held. Do this **even when the project had no
-manifest** (the legacy case) — it is the whole point of this run's precision bootstrap (§2): without it the
-next upgrade stays in feature-detection mode. This is a TRACKED file the operator commits, so list it in the
-plan (§4) and report it (§5) — never write it silently.
+"<sha256>" } }`. Set `template_version` to the **current** plugin version (the one you upgraded toward), not
+any stale value a prior manifest held.
+
+**Record ONLY template-faithful files; OMIT customized ones.** The recorded hash is the *template baseline* —
+"pristine" on the next run means "current == recorded → safe to regenerate wholesale." So record a
+`sha256sum` / `shasum -a 256` hash **only for files whose post-upgrade content matches the re-rendered current
+template** (files you created, regenerated, or that were already clean). **OMIT** any file you left customized
+or insert-merged with operator edits — a scoped-coverage `gate.sh`, a project's toolchain
+`Containerfile`/`ci.yml`, a `Makefile` carrying extra edits. **Never record a customized file's hash:** doing
+so would make the next upgrade read `current == recorded` as *pristine* and propose regenerating it into the
+generic template — destroying the very customization you just preserved. (An omitted file is feature-detected
+next time, §2 — insert-only, safe.)
+
+Do this **even when the project had no manifest** (the legacy case) — it is the whole point of this run's
+precision bootstrap (§2): without it the next upgrade stays in feature-detection mode. This is a TRACKED file
+the operator commits, so list it in the plan (§4) and report it (§5) — never write it silently.
 
 ## 4. Confirm before writing (never silent, never blind overwrite)
 

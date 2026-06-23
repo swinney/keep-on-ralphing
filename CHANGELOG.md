@@ -15,6 +15,17 @@ reaching a machine can take two steps:
 
 Dates are UTC.
 
+## [0.8.3] — 2026-06-23
+
+### Changed
+- **Scaffolded `PROMPT.md` strengthens the test phase toward test-first.** The implement step now tells the
+  agent to **run the tests and confirm they fail before implementing** ("never trust a test you haven't seen
+  fail") — a cheap second net against tautological / faked-precondition tests, reinforcing the existing
+  spec→test→implement cycle without committing red (the "see it fail" happens at the start of the implement
+  turn; the commit stays green). Template + `example/PROMPT.md`.
+
+Host-side only — no base-image rebuild.
+
 ## [0.8.2] — 2026-06-23
 
 ### Fixed
@@ -287,6 +298,7 @@ New config keys: `RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`, `RALPH_REVIEW_MAX_ROUN
   `docs/questions.md`, and a spec-*writing guide* (never a fake placeholder spec). Existing
   files are never overwritten.
 
+[0.8.3]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.3
 [0.8.2]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.2
 [0.8.1]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.1
 [0.8.0]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.0

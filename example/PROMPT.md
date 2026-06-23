@@ -21,8 +21,9 @@ or tests to silence a finding. Do not pick a /tasks.md task while
    in /docs/specs/<system>.md and stop. Mark task progress, commit, exit.
 4. If the spec exists but tests don't, write the test suite in
    /tests/<system>/ derived from the spec. Stop. Commit. Exit.
-5. If tests exist but fail or are missing implementation, implement
-   until all tests pass. Then commit. Exit.
+5. If tests exist but fail or are missing implementation, run the tests and
+   confirm they fail before implementing (never trust a test you haven't seen
+   fail), then implement until all tests pass. Then commit. Exit.
 6. Before any commit, run the FULL gate and fix any failure before
    committing (do not commit red):
    `./scripts/gate.sh`

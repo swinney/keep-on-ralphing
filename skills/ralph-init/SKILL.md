@@ -190,18 +190,42 @@ refusal at first run:
 Then ensure the runtime state is gitignored — append `.ralph/` and
 `/review-findings.md` to the repo's `.gitignore` (create it if missing).
 `review-findings.md` is machine-written by the review gate, like `.ralph/`, so it
-must not be committed.
+must not be committed. **Do NOT gitignore `.ralph-scaffold.json`** (below) — it is
+durable provenance meant to be committed, not runtime state.
+
+### 3e. Scaffold provenance manifest
+
+After writing the files, write a **scaffold provenance manifest** so a later
+`/ralph-upgrade` can tell which generated files the operator has since customized:
+
+- Write it to **`.ralph-scaffold.json` at the repo root** — a **TRACKED (committed)**
+  file, NOT inside the gitignored `.ralph/` runtime dir. It must travel with the repo
+  to other clones/machines (the kit is team-shared via GitHub), or the upgrade
+  skill's precision path never fires on a clone.
+- Format: `{ "template_version": "<this plugin's version>", "files": { "<path>":
+  "<sha256>" } }`, recording a content hash (`sha256sum` / `shasum -a 256`) of each
+  file you generated from a template (`ralph.conf`, `PROMPT.md`, `Makefile`,
+  `Containerfile`, `scripts/gate.sh`, `hooks/pre-commit`,
+  `.github/workflows/ci.yml`, `STATUS.md`, `docs/questions.md`, the specs-dir guide,
+  `docs/operator-checklist.md`). Only hash files you actually wrote this run.
+- It is **advisory**: never block on it. If a file already existed and was skipped,
+  you MAY still record its current hash so upgrade has a baseline. If `.ralph-scaffold.json`
+  already exists, merge/refresh rather than clobber.
 
 ## 4. Report, then offer to build
 
 - Print a short table of every value, marked **inferred** or **asked**.
 - Print a second table of every file/dir written, each marked **created** or
   **skipped (already present)** — covering config (§3a), the gate components
-  `scripts/gate.sh` / `hooks/pre-commit` / `.github/workflows/ci.yml` (§3b), and
-  the readiness items: specs/tests/decisions dirs, `STATUS.md`, `docs/questions.md`,
+  `scripts/gate.sh` / `hooks/pre-commit` / `.github/workflows/ci.yml` (§3b), the
+  readiness items: specs/tests/decisions dirs, `STATUS.md`, `docs/questions.md`,
   the specs-dir guide and any first spec captured, and
-  `docs/operator-checklist.md` (§3c). If you hit a hooks-path conflict, surface
-  the warning here.
+  `docs/operator-checklist.md` (§3c), and the `.ralph-scaffold.json` manifest (§3e).
+  If you hit a hooks-path conflict, surface the warning here.
+- **Upgrading later:** tell the operator that to adopt *future* template changes on
+  this project they run **`/ralph-upgrade`**, NOT re-run `/ralph-init` — init is
+  no-overwrite and will skip files that already exist, so it cannot carry changes
+  into an existing project. (`/ralph-init` seeds; `/ralph-upgrade` merges changes.)
 - Print an **autonomy note**: point the operator to `docs/operator-checklist.md`
   and state plainly that unattended (walk-away) operation is a **gated opt-in** —
   it requires all four preconditions (well-specified work, model matched from turn 1,

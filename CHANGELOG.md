@@ -15,6 +15,31 @@ reaching a machine can take two steps:
 
 Dates are UTC.
 
+## [0.8.0] — 2026-06-22
+
+Adds an upgrade path for already-installed projects. Host-side only — no runner change, **no
+base-image rebuild needed**.
+
+### Added
+- **`/ralph-upgrade` skill.** Brings a project's already-scaffolded config up to the current
+  templates — a **confirm-gated** merge that ADDS missing pieces (`Makefile` blocks,
+  `ralph.conf` keys, `PROMPT.md` clauses, new files) while **preserving your
+  customizations**. It fills the gap `/ralph-init` cannot: init is no-overwrite (first-time
+  only), so it never carries template *changes* into an existing project — `/ralph-upgrade`
+  does. It is config-only and defers base-image upgrades to `/ralph-build-base`. Leads with
+  the `Makefile`/`GH_TOKEN` block whose absence makes a review-gated loop refuse to start.
+- **Scaffold provenance manifest.** `/ralph-init` now writes a tracked `.ralph-scaffold.json`
+  at the repo root (`{ template_version, files: { <path>: <sha256> } }`) so `/ralph-upgrade`
+  can classify each file as pristine-since-scaffold (safe to regenerate) vs. customized
+  (insert-only). On projects without a manifest (anything scaffolded before 0.8.0),
+  `/ralph-upgrade` falls back to feature-detection.
+
+### Changed
+- README gains an **"Upgrading an already-installed harness"** section
+  (`/plugin update` → `/ralph-build-base` → `/ralph-upgrade`).
+- `/ralph-init`'s report now points to `/ralph-upgrade` for adopting template changes (don't
+  re-run init). A 5th structural conformance check keeps the example manifest honest.
+
 ## [0.7.0] — 2026-06-22
 
 Ports the last two `ralph-framework` layers into the kit: **work-class model dispatch**
@@ -234,6 +259,7 @@ New config keys: `RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`, `RALPH_REVIEW_MAX_ROUN
   `docs/questions.md`, and a spec-*writing guide* (never a fake placeholder spec). Existing
   files are never overwritten.
 
+[0.8.0]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.0
 [0.7.0]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.7.0
 [0.6.3]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.6.3
 [0.6.2]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.6.2

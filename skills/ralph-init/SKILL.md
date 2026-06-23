@@ -146,10 +146,14 @@ file or directory that already exists** — leave it intact and record it as
   `{{PROJECT_NAME}}`), written as `<SPECS_DIR>/README.md`, ONLY if absent. This is
   a GUIDE, not a starter spec: do NOT scaffold a placeholder spec the loop could
   mistake for real requirements (a convincing-but-fake spec makes the loop build
-  the wrong thing). If the user can describe the first subsystem in a sentence or
-  two, offer to write that as the first REAL spec (`<SPECS_DIR>/<system>.md`);
-  otherwise leave the dir with just the guide and let the loop's normal
-  spec→test→implement workflow take over.
+  the wrong thing). **SKIP the guide entirely when the project already uses a
+  recognized spec system**, by this deterministic signal: an `openspec/` directory
+  exists at the repo root, OR `<SPECS_DIR>` already contains at least one real spec
+  file (any `*.md` other than this guide's `README.md` and `.gitkeep`) — the generic
+  guide is redundant and confusing there; note why you skipped it. Otherwise: if the
+  user can describe the first subsystem in a sentence or two, offer to write that as
+  the first REAL spec (`<SPECS_DIR>/<system>.md`); else leave the dir with just the
+  guide and let the loop's normal spec→test→implement workflow take over.
 - An **operator checklist** — from `operator-checklist.md.template` (verbatim, no
   placeholders), written as `docs/operator-checklist.md`, ONLY if absent. It carries
   the three pre-action checklists (before backgrounding a job / reproducing a failure

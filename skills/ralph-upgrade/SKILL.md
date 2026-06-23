@@ -51,7 +51,9 @@ Look for a scaffold provenance manifest at the repo root: **`.ralph-scaffold.jso
   this?" signal) is what is reconstructable — and sufficient.
 - **Manifest absent** (legacy projects — e.g. anything scaffolded before manifests existed, the v0.2→v0.7
   case) — fall back to **feature-detection** for every file: detect whether each known upgrade block is
-  present and offer to insert the missing ones.
+  present and offer to insert the missing ones. **This run will also write `.ralph-scaffold.json`** (§3, §4),
+  bootstrapping the precise path so the *next* `/ralph-upgrade` runs in manifest-based mode instead of
+  feature-detection.
 
 **Report which mode you used** ("manifest-based" vs "feature-detection") so the operator knows the
 confidence level. If the manifest is malformed/partial, treat the affected files as manifest-absent and say
@@ -70,23 +72,37 @@ first** (so a substituted `{{PLACEHOLDER}}` does not show as a diff), then:
     token; without this a review-gated loop refuses to start. State this risk explicitly.
   - the **`check-base`** target and its `loop`/`loop-once` prerequisite (refuses a loop image built on a
     superseded base).
-- **`ralph.conf` (low-risk).** Append documented keys the file lacks — **commented / at their built-in
-  defaults** — so new knobs become discoverable without changing behavior. Never reorder or rewrite the
-  operator's existing values.
+- **`ralph.conf` (low-risk).** Append both (a) documented **active keys** the file lacks and (b) **commented
+  documentation sections** the current template adds that the project lacks — e.g. the work-class dispatch
+  block (`# RALPH_MODEL_STATEFUL=...`), which carries NO active key and so is invisible to a keys-only diff.
+  Offer everything **commented / at its built-in default** so new knobs become discoverable without changing
+  behavior. Never reorder or rewrite the operator's existing values.
 - **`PROMPT.md` (medium).** Offer to append missing contract clause-blocks (e.g. the discipline clauses,
   the work-class tag convention) the project lacks; preserve the operator's wording and any custom rules.
-- **New files** (e.g. `docs/operator-checklist.md`, the specs-dir guide). Create if absent — the same
-  no-overwrite create `/ralph-init` does. Never overwrite an existing one.
+- **New files** (e.g. `docs/operator-checklist.md`). Create if absent — the same no-overwrite create
+  `/ralph-init` does. Never overwrite an existing one. **Exception — the specs-dir writing guide:** SKIP it
+  when the project already uses a recognized spec system, by this deterministic signal: an `openspec/`
+  directory exists at the repo root, OR the configured specs dir already contains at least one real spec file
+  (any `*.md` other than the guide `README.md` and `.gitkeep`). In that case the generic guide is redundant
+  and confusing — skip it and note why. Otherwise create-if-absent as before.
 - **Generic fallback.** For any other template line/section absent from the project's file, offer it as an
   opt-in hunk (clearly labeled) rather than forcing it.
 
-After a successful upgrade, **refresh `.ralph-scaffold.json`** (if present, or offer to create it) so the
-recorded hashes match the now-upgraded files and future upgrades stay precise.
+**Write the scaffold manifest.** After a confirmed upgrade, **write/refresh `.ralph-scaffold.json`** at the
+repo root in the format from §2 — `{ "template_version": "<CURRENT plugin version>", "files": { "<path>":
+"<sha256>" } }` — recording a content hash (`sha256sum` / `shasum -a 256`) of each Ralph-owned config file
+*as it stands after the upgrade applies*. Set `template_version` to the **current** plugin version (the one
+you upgraded toward), not any stale value a prior manifest held. Do this **even when the project had no
+manifest** (the legacy case) — it is the whole point of this run's precision bootstrap (§2): without it the
+next upgrade stays in feature-detection mode. This is a TRACKED file the operator commits, so list it in the
+plan (§4) and report it (§5) — never write it silently.
 
 ## 4. Confirm before writing (never silent, never blind overwrite)
 
 This is a high-stakes skill — a bad `Makefile` merge breaks the loop. So:
 - Show the proposed change **per file as a diff** before writing anything.
+- **List writing/refreshing `.ralph-scaffold.json` as an explicit plan item** (it is a tracked file the
+  operator commits) — never leave it as an unannounced side effect.
 - Mark the recommended action and, for high-stakes items (the `Makefile`/`GH_TOKEN` change — it can be what
   unblocks a refusing loop), **state the risk** and require explicit confirmation.
 - Never apply silently; never replace a customized line in place of merely inserting what is absent. If a
@@ -96,8 +112,10 @@ This is a high-stakes skill — a bad `Makefile` merge breaks the loop. So:
 ## 5. Report
 
 Print a compact report: the mode used (manifest vs feature-detection); per file, one of **upgraded** /
-**already current** / **skipped (customized — manual review)** / **created**; and any conflicts left for the
-operator. End with the base-image note (§6) if relevant.
+**already current** / **skipped (customized — manual review)** / **created**; **whether
+`.ralph-scaffold.json` was written/refreshed** (and, if this was a legacy first run, that the next upgrade
+will be manifest-based); and any conflicts left for the operator. End with the base-image note (§6) if
+relevant.
 
 ## 6. Defer runner/base-image upgrades
 

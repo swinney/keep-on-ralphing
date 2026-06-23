@@ -81,18 +81,21 @@ first** (so a substituted `{{PLACEHOLDER}}` does not show as a diff), then:
   the work-class tag convention) the project lacks; preserve the operator's wording and any custom rules.
 - **New files** (e.g. `docs/operator-checklist.md`). Create if absent — the same no-overwrite create
   `/ralph-init` does. Never overwrite an existing one. **Exception — the specs-dir writing guide:** SKIP it
-  when the project already uses a recognized spec system (an `openspec/` directory, or an established
-  non-trivial specs body) — the generic guide is redundant and confusing there; note why you skipped it. Only
-  create-if-absent when no such spec-system signal exists.
+  when the project already uses a recognized spec system, by this deterministic signal: an `openspec/`
+  directory exists at the repo root, OR the configured specs dir already contains at least one real spec file
+  (any `*.md` other than the guide `README.md` and `.gitkeep`). In that case the generic guide is redundant
+  and confusing — skip it and note why. Otherwise create-if-absent as before.
 - **Generic fallback.** For any other template line/section absent from the project's file, offer it as an
   opt-in hunk (clearly labeled) rather than forcing it.
 
 **Write the scaffold manifest.** After a confirmed upgrade, **write/refresh `.ralph-scaffold.json`** at the
-repo root, recording a content hash (`sha256sum` / `shasum -a 256`) of each Ralph-owned config file *as it
-stands after the upgrade applies*. Do this **even when the project had no manifest** (the legacy case) — it is
-the whole point of this run's precision bootstrap (§2): without it the next upgrade stays in feature-detection
-mode. This is a TRACKED file the operator commits, so list it in the plan (§4) and report it (§5) — never
-write it silently.
+repo root in the format from §2 — `{ "template_version": "<CURRENT plugin version>", "files": { "<path>":
+"<sha256>" } }` — recording a content hash (`sha256sum` / `shasum -a 256`) of each Ralph-owned config file
+*as it stands after the upgrade applies*. Set `template_version` to the **current** plugin version (the one
+you upgraded toward), not any stale value a prior manifest held. Do this **even when the project had no
+manifest** (the legacy case) — it is the whole point of this run's precision bootstrap (§2): without it the
+next upgrade stays in feature-detection mode. This is a TRACKED file the operator commits, so list it in the
+plan (§4) and report it (§5) — never write it silently.
 
 ## 4. Confirm before writing (never silent, never blind overwrite)
 

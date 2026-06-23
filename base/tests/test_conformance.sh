@@ -165,6 +165,40 @@ else
   printf '%s' "$hash_dups" | sed 's/^/      /'
 fi
 
+# --- 5. example scaffold manifest matches the example files ------------------
+# /ralph-init writes a tracked .ralph-scaffold.json (template version + per-file
+# content hash) so /ralph-upgrade can classify a file as pristine vs customized.
+# The example golden reference carries one; its recorded hashes MUST match the
+# actual example files, or the manifest silently drifts and would misclassify
+# files on upgrade. (sha256 here is in base/tests/, exempt from check 4's
+# single-source rule, and uses python3 hashlib — not the sha256sum/shasum tokens.)
+ex_manifest="example/.ralph-scaffold.json"
+if [ ! -f "$ex_manifest" ]; then
+  bad "scaffold manifest: $ex_manifest is missing (the golden reference must carry it)"
+else
+  man_mismatch=$(cd example && python3 - <<'PY'
+import json, hashlib
+m = json.load(open(".ralph-scaffold.json"))
+out = []
+for path, want in m.get("files", {}).items():
+    try:
+        got = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    except OSError:
+        out.append(f"{path}: file missing")
+        continue
+    if got != want:
+        out.append(f"{path}: {got[:12]} != recorded {want[:12]}")
+print("\n".join(out))
+PY
+)
+  if [ -z "$man_mismatch" ]; then
+    ok "scaffold manifest: example/.ralph-scaffold.json hashes match the example files"
+  else
+    bad "scaffold manifest: example/.ralph-scaffold.json has drifted from the example files:"
+    printf '%s\n' "$man_mismatch" | sed 's/^/      /'
+  fi
+fi
+
 echo
 echo "conformance tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

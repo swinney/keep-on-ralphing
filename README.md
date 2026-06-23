@@ -30,7 +30,8 @@ The harness splits by *where each piece runs*:
 - **`skills/`** — the Claude Code plugin: `/ralph-init` scaffolds a project's
   config from `templates/`; `/ralph-status` reports loop state from `.ralph/`;
   `/ralph-build-base` builds `ralph-base:v1` from the plugin's bundled `base/`
-  (clone-free).
+  (clone-free); `/ralph-upgrade` brings an already-scaffolded project's config up
+  to the current templates (see [Upgrading](#upgrading-an-already-installed-harness)).
 - **`templates/` + `example/`** — the per-project config surface and a fully
   resolved sample.
 - **`extras/`** — unsupported odds and ends (see its README).
@@ -124,10 +125,11 @@ keys on the content hash (plus the host UID/GID), not the plugin version.
 ## Upgrading an already-installed harness
 
 Upgrading spans all three channels (see [Three channels](#three-channels)): the **plugin** (skills +
-templates) and the **base image** (the runner) have clean update paths (steps 1–2); your **in-repo config**
-(the files `/ralph-init` generated) does not — **re-running `/ralph-init` does NOT upgrade an existing
-project** (it is no-overwrite: it only scaffolds *missing* files, never changes ones you already have), which
-is why step 3 is a manual merge.
+templates) updates via `/plugin update`, the **base image** (the runner) via `/ralph-build-base`, and your
+**in-repo config** (the files `/ralph-init` generated) via `/ralph-upgrade` (steps 1–3 below). The config
+channel needs its own step because **re-running `/ralph-init` does NOT upgrade an existing project** — it is
+no-overwrite (it only scaffolds *missing* files, never changes ones you already have), so propagating template
+*changes* is `/ralph-upgrade`'s job, not init's.
 
 **1. Update the plugin** (latest skills + templates):
 ```
@@ -145,23 +147,26 @@ then `make build` in each project. `/ralph-build-base` is idempotent (it skips t
 current), and `/ralph-status` plus the `make loop` `check-base` preflight flag a stale base, so you don't
 have to track this by hand.
 
-**3. Adopt config changes in an existing project (manual).** Because `/ralph-init` never overwrites, new
-template *content* doesn't reach a project that already has those files. Diff your files against the plugin's
-bundled `templates/` (or the golden `example/`) — they live under `$CLAUDE_PLUGIN_ROOT` (resolvable inside
-Claude Code, e.g. `$CLAUDE_PLUGIN_ROOT/templates/`; contributors with a checkout use the repo's `templates/`)
-— and merge by hand:
-- **`Makefile`** — the one that can *break* the loop. Newer versions forward `GH_TOKEN` into the container
-  (the default-on review gate needs it) and add a `check-base` preflight. A `Makefile` missing the
-  `GH_TOKEN` forwarding makes a review-gated loop **refuse to start** — merge it in, or set
-  `RALPH_REVIEW_GATE=0` for an offline loop.
-- **`ralph.conf`** — new keys have built-in defaults, so the loop runs without them; copy the new commented
-  keys from `example/ralph.conf` only to discover/tune them.
-- **`PROMPT.md`** — merge in any new contract clauses you want.
-- **New files** (e.g. `docs/operator-checklist.md`) — these `/ralph-init` *will* add on a re-run (it creates
-  missing files, skips existing), or copy them from the plugin.
+**3. Adopt config changes with `/ralph-upgrade`.** Because `/ralph-init` never overwrites, new template
+*content* doesn't reach a project that already has those files — so **run `/ralph-upgrade`**, which detects
+what's missing and proposes a **confirm-gated merge that preserves your customizations**. It covers the whole
+in-repo config channel:
+- **`Makefile`** — the one that can *break* the loop. It forwards `GH_TOKEN` into the container (the
+  default-on review gate needs it) and adds a `check-base` preflight; a `Makefile` missing the `GH_TOKEN`
+  forwarding makes a review-gated loop **refuse to start**. `/ralph-upgrade` flags this as high-stakes and
+  inserts the missing blocks (or set `RALPH_REVIEW_GATE=0` for an offline loop).
+- **`ralph.conf`** — appends new keys commented / at defaults (behavior unchanged until you tune them).
+- **`PROMPT.md`** — offers to append new contract clauses, preserving your edits.
+- **New files** (e.g. `docs/operator-checklist.md`) — created if absent.
+
+`/ralph-upgrade` is precise when the project carries a tracked `.ralph-scaffold.json` (written by
+`/ralph-init`: it classifies each file as pristine-since-scaffold vs. customized) and falls back to
+feature-detection on older projects that lack it. It is **config only** — it never rebuilds the base image
+(that's step 2 / `/ralph-build-base`). To merge by hand instead, diff against the plugin's bundled
+`templates/` (under `$CLAUDE_PLUGIN_ROOT`, resolvable inside Claude Code) or `example/`.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the per-version feature list — entries that change the runner are
-marked "rebuild the base image." (Automating step 3's config merge as a `/ralph-upgrade` skill is proposed.)
+marked "rebuild the base image."
 
 ## Configuration
 

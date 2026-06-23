@@ -100,8 +100,9 @@ any stale value a prior manifest held.
 "pristine" on the next run means "current == recorded → safe to regenerate wholesale." So record a
 `sha256sum` / `shasum -a 256` hash **only for files whose post-upgrade content matches the re-rendered current
 template** (files you created, regenerated, or that were already clean). **OMIT** any file you left customized
-or insert-merged with operator edits — a scoped-coverage `gate.sh`, a project's toolchain
-`Containerfile`/`ci.yml`, a `Makefile` carrying extra edits. **Never record a customized file's hash:** doing
+or insert-merged with operator edits — a scoped-coverage `scripts/gate.sh`, a project's toolchain
+`Containerfile`/`.github/workflows/ci.yml`, a `Makefile` carrying extra edits. **Never record a customized
+file's hash:** doing
 so would make the next upgrade read `current == recorded` as *pristine* and propose regenerating it into the
 generic template — destroying the very customization you just preserved. (An omitted file is feature-detected
 next time, §2 — insert-only, safe.)

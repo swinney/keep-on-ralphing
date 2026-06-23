@@ -22,7 +22,7 @@ wholesale-regenerated.
 - **AND** a subsequent `/ralph-upgrade` runs in manifest-based mode
 
 #### Scenario: A customized file is omitted from the manifest, not recorded as pristine
-- **WHEN** the upgrade leaves a file customized (e.g. a scoped-coverage `gate.sh`, or a project's toolchain `Containerfile`/`ci.yml`)
+- **WHEN** the upgrade leaves a file customized (e.g. a scoped-coverage `scripts/gate.sh`, or a project's toolchain `Containerfile`/`.github/workflows/ci.yml`)
 - **THEN** that file is omitted from the manifest's `files`
 - **AND** a subsequent `/ralph-upgrade` feature-detects it (insert-only, preserved) and never proposes regenerating it wholesale
 

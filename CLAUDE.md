@@ -316,7 +316,7 @@ spec↔implementation seam, in code no diff touches.
 
 The prompt fed to the agent each turn enforces: one task per turn, a strict
 spec → test → implement cycle (write the tests and **run them to confirm they fail
-before implementing** — never trust a test never seen failing), run the **full gate in CI order before every commit**
+before implementing** — never trust a test you haven't seen fail), run the **full gate in CI order before every commit**
 (format, don't just check), mark a task done only when its full cycle is green, and a
 `Ralph-Task:` commit trailer with **no `Co-Authored-By`/AI attribution**. The gate
 includes a **coverage threshold** — "tests pass" is not "the code is tested"; meet it by

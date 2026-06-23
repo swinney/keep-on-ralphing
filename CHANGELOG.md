@@ -15,6 +15,34 @@ reaching a machine can take two steps:
 
 Dates are UTC.
 
+## [0.8.2] — 2026-06-23
+
+### Fixed
+- **`/ralph-upgrade` manifest now records only template-faithful files.** The 0.8.1 backfill recorded a hash
+  for *every* Ralph-owned file post-upgrade — including the **customized** ones it skipped (`scripts/gate.sh`,
+  a project's toolchain `Containerfile`/`.github/workflows/ci.yml`). Because "pristine" means
+  `current == recorded → safe to regenerate wholesale`, a later upgrade would misread those as pristine and
+  propose regenerating them into the generic template — a data-loss-class defect (confirm-gated, so not
+  silent). Now the manifest records only files whose post-upgrade content matches the re-rendered current
+  template and **omits** customized/insert-merged ones; an un-recorded file is feature-detected (preserved),
+  never regenerated. *Existing 0.8.1 manifests: re-run `/ralph-upgrade` once under 0.8.2 to rewrite correctly.*
+
+Host-side only — no base-image rebuild.
+
+## [0.8.1] — 2026-06-23
+
+Refinements from `/ralph-upgrade`'s first live use. Host-side only — no base-image rebuild.
+
+### Changed
+- **`/ralph-upgrade` surfaces and writes the scaffold manifest.** Writing/refreshing `.ralph-scaffold.json`
+  is now an explicit, approvable plan + report item (was buried), and it is written after a confirmed
+  upgrade — including on a legacy no-manifest project, so the *next* run uses the precise manifest path.
+- **`ralph.conf` upgrade offers missing commented documentation sections** (e.g. the work-class dispatch
+  block), not only missing active keys.
+- **The specs-writing guide is skipped when a spec system is present** — `/ralph-upgrade` and `/ralph-init`
+  skip it when an `openspec/` directory exists or the specs dir already holds a real spec file (deterministic
+  signal, not ad-hoc judgment).
+
 ## [0.8.0] — 2026-06-22
 
 Adds an upgrade path for already-installed projects. Host-side only — no runner change, **no
@@ -259,6 +287,8 @@ New config keys: `RALPH_REVIEW_GATE`, `RALPH_AUTO_MERGE`, `RALPH_REVIEW_MAX_ROUN
   `docs/questions.md`, and a spec-*writing guide* (never a fake placeholder spec). Existing
   files are never overwritten.
 
+[0.8.2]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.2
+[0.8.1]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.1
 [0.8.0]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.8.0
 [0.7.0]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.7.0
 [0.6.3]: https://github.com/swinney/keep-on-ralphing/releases/tag/v0.6.3

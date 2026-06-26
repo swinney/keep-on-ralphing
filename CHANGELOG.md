@@ -15,6 +15,33 @@ reaching a machine can take two steps:
 
 Dates are UTC.
 
+## [0.11.0] — 2026-06-26
+
+### Fixed
+- **Review gate is now robust on forked clones (`review-gate-fork-base`).** Two root causes that made
+  the outer-loop review gate silently skip every turn on a fork checkout (an `origin` plus an `upstream`
+  remote, no `gh repo set-default` recorded) are fixed in `base/scripts/ralph.sh`:
+  - **(A) `gh pr create` errors are no longer swallowed.** `ensure_pr` previously ran
+    `gh pr create ... >/dev/null 2>&1`, discarding the failure that hid the real problem; it now
+    captures combined output and `narrate`s it on failure. It also distinguishes "no PR yet" (clean
+    exit) from "gh errored" (non-zero exit with stderr) so a transient/auth failure is surfaced, not
+    misread as "no PR → create".
+  - **(B) The gate's base repo is pinned to `origin`.** A new `origin_repo()` helper resolves the base
+    repo (new `RALPH_REPO=owner/name` env override wins, env > `ralph.conf` > default; else it parses
+    the `origin` remote URL) and threads `--repo` into **every** gate `gh pr` call (view, create,
+    re-read, edit, view-comments, checks, merge), guarded so an unresolvable (e.g. local/non-GitHub)
+    remote omits the flag rather than emitting a broken `--repo ''`. Without this, `gh` resolved a
+    fork's base repo to its **parent** (upstream), so PRs were never created on the fork. A GitHub
+    origin that cannot be parsed is now a loud, actionable error instead of a silent fall-back to the
+    parent.
+  - Also closed: a **false-PASS** hole where a failed comments-fetch collapsed into empty findings and
+    passed the gate — a fetch failure now emits a synthetic finding. `ci_status`, `merge_pr`, and the
+    branch `git push` now narrate their real error; a failed push **aborts** the turn so the gate never
+    reviews stale/missing commits. New `RALPH_REPO` env documented in the `ralph.sh` header.
+
+**Two-channel release — base-image rebuild required** (runner change). Run `make build-base` /
+`/ralph-build-base` on every loop machine, then `/plugin update`.
+
 ## [0.10.0] — 2026-06-26
 
 ### Added

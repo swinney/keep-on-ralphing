@@ -56,6 +56,8 @@ new_gate_ws() {
   : >"$STUB/pr_number"   # empty -> `pr view` reports "no PR" until `pr create`
   echo 0 >"$STUB/ci_exit" # gh pr checks exit: 0=pass, 8=pending, other=fail
   echo 0 >"$STUB/merge_exit" # gh pr merge exit: 0=merged, other=merge failed
+  echo 0 >"$STUB/create_exit" # gh pr create exit: 0=created, other=create failed
+  echo 0 >"$STUB/comments_exit" # gh pr view --json comments exit: 0=ok, other=fetch failed
   : >"$STUB/findings"     # reviewer findings, one per line (empty = clean)
   : >"$STUB/gh.log"
 
@@ -80,10 +82,17 @@ echo "\$*" >>"$STUB/gh.log"
 case "\$*" in
   "auth status"*) exit 0 ;;
   *"pr view"*"--json number"*)
-    if [ -s "$STUB/pr_number" ]; then cat "$STUB/pr_number"; exit 0; else exit 1; fi ;;
+    # Real gh: a no-PR branch EXITS 1 WITH stderr "no open pull requests found ...",
+    # not a silent empty — the gate must read that as the create case, not an error.
+    if [ -s "$STUB/pr_number" ]; then cat "$STUB/pr_number"; exit 0; else echo "no pull requests found for branch \"feat\"" >&2; exit 1; fi ;;
   *"pr view"*"--json comments"*)
+    ce=\$(cat "$STUB/comments_exit" 2>/dev/null || echo 0)
+    if [ "\$ce" != 0 ]; then echo "comments fetch boom" >&2; exit "\$ce"; fi
     cat "$STUB/findings"; exit 0 ;;
-  *"pr create"*) echo 1 >"$STUB/pr_number"; exit 0 ;;
+  *"pr create"*)
+    xe=\$(cat "$STUB/create_exit" 2>/dev/null || echo 0)
+    if [ "\$xe" != 0 ]; then echo "create boom: head branch not found" >&2; exit "\$xe"; fi
+    echo 1 >"$STUB/pr_number"; exit 0 ;;
   *"pr edit"*) exit 0 ;;
   *"pr checks"*) exit "\$(cat "$STUB/ci_exit" 2>/dev/null || echo 0)" ;;
   *"pr merge"*) exit "\$(cat "$STUB/merge_exit" 2>/dev/null || echo 0)" ;;
@@ -389,6 +398,91 @@ read -r rid st blk < <(python3 -c "import json;d=json.load(open('$WS/.ralph/curr
 { [ -n "$rid" ] && [ "$rid" != "OLD-RUN" ] && [ "$st" = "starting" ] && [ "$blk" = "False" ]; } \
   && ok "startup stamps a fresh run identity (run_id=$rid state=$st) and clears stale signals" \
   || bad "startup stamp wrong (run_id='$rid' state='$st' blocked='$blk')"
+cleanup
+
+# --- 18. (A) a scripted `gh pr create` failure narrates the captured gh error ---
+# Before the fix, `gh pr create ... >/dev/null 2>&1` discarded the failure entirely;
+# the gate only narrated the generic "could not resolve a PR ... skipping this turn"
+# with no diagnostic. Now the captured stderr must surface via narrate.
+new_gate_ws
+echo 1 >"$STUB/create_exit" # gh pr create fails
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+out=$(RALPH_ARGS="" run_gate 2>&1)
+printf '%s' "$out" | grep -qi "gh pr create" \
+  && printf '%s' "$out" | grep -qi "create boom" \
+  && ok "(A) a failed gh pr create narrates the captured gh error" \
+  || bad "(A) create failure not surfaced (output lacked the captured gh error)"
+# Pollution guard: ensure_pr's diagnostics go to STDERR, so a failed create returns
+# an EMPTY num and the gate skips BEFORE ci_status — if narrate had leaked onto the
+# captured stdout, num would be the error text and `gh pr checks` would run on it.
+grep -q "pr checks" "$STUB/gh.log" \
+  && bad "(A) create failure ran 'pr checks' — narrate leaked into the captured PR number" \
+  || ok "(A) a failed create skips cleanly (no pr checks against a polluted num)"
+cleanup
+
+# --- 19. (B) RALPH_REPO override threads --repo into the gate's gh pr calls -----
+# A fork checkout must pin the base repo to origin, not gh's implicit (parent) repo.
+# The override forces a concrete owner/name so the flag is asserted in gh.log; the
+# value is arbitrary (generic — no hardcoded real repo).
+new_gate_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+RALPH_ARGS="" run_gate RALPH_REPO=acme/widgets >/dev/null 2>&1
+grep "pr view" "$STUB/gh.log" | grep -q -- "--repo acme/widgets" \
+  && ok "(B) --repo threads into gh pr view" || bad "(B) gh pr view missing --repo acme/widgets"
+grep "pr create" "$STUB/gh.log" | grep -q -- "--repo acme/widgets" \
+  && ok "(B) --repo threads into gh pr create" || bad "(B) gh pr create missing --repo acme/widgets"
+grep "pr checks" "$STUB/gh.log" | grep -q -- "--repo acme/widgets" \
+  && ok "(B) --repo threads into gh pr checks" || bad "(B) gh pr checks missing --repo acme/widgets"
+cleanup
+
+# --- 19b. (B) a local/non-github origin omits --repo (no broken `--repo ''`) ----
+# The existing fixtures use a bare local path remote; the gate must degrade to no
+# --repo, never a broken empty value. (Backstops the unchanged scenarios above.)
+new_gate_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+RALPH_ARGS="" run_gate >/dev/null 2>&1
+grep -q -- "--repo" "$STUB/gh.log" \
+  && bad "(B) local origin must omit --repo (found a --repo flag)" \
+  || ok "(B) a non-github local origin omits --repo entirely"
+cleanup
+
+# --- 20. (false PASS) a failed comments-fetch + green CI must NOT pass ----------
+# Before the fix, a swallowed comments-fetch error (auth/rate-limit/5xx) produced
+# empty findings, so empty-findings + green-CI was a false PASS where no review ran.
+# Now a fetch failure must yield a synthetic finding so the gate cannot PASS.
+new_gate_ws
+echo 1 >"$STUB/comments_exit" # gh pr view --json comments fails
+# green CI (ci_exit default 0); single round then bail so it doesn't loop forever.
+for n in 1 2; do
+  cat >"$STUB/count-${n}.sh" <<'S'
+git commit --allow-empty -qm work
+S
+done
+out=$(RALPH_ARGS="" run_gate RALPH_REVIEW_MAX_ROUNDS=1 RALPH_MAX_STALLS=9 2>&1)
+printf '%s' "$out" | grep -qi "review-gate PASS" \
+  && bad "(false PASS) gate PASSED despite a failed comments fetch" \
+  || ok "(false PASS) a failed comments fetch does NOT yield a PASS"
+[ -s "$WS/review-findings.md" ] && grep -qi "review fetch failed" "$WS/review-findings.md" \
+  && ok "(false PASS) a failed comments fetch writes a synthetic finding" \
+  || bad "(false PASS) no synthetic 'review fetch failed' finding written"
 cleanup
 
 echo

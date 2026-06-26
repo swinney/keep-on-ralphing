@@ -73,6 +73,30 @@ def test_stale_prior_run_is_never_live():
     assert classify_phase({"state": "idle", "run_id": "OLD"}, container_running=False) == "killed"
 
 
+def test_run_id_mismatch_with_running_container_is_not_live():
+    # D4: once a live run is latched, a current.json showing a DIFFERENT run_id —
+    # even with a container running and a non-terminal state — is NOT the live run
+    # (a stale leftover, or a new loop that replaced ours). Without the latch
+    # (expected_run_id=None) the same record reads as the live run.
+    cur = {"state": "running", "run_id": "NEW"}
+    assert classify_phase(cur, container_running=True, expected_run_id="OURS") == "ended"
+    assert classify_phase(cur, container_running=True, expected_run_id="NEW") == "running"
+    assert classify_phase(cur, container_running=True) == "running"  # no latch yet
+
+
+def test_derive_state_run_id_mismatch_drops_halt_class(tmp_path):
+    # A stale/replaced run must not borrow another run's state as our halt class.
+    state_dir = tmp_path / ".ralph"
+    state_dir.mkdir()
+    (state_dir / "current.json").write_text(
+        '{"state": "complete", "run_id": "OTHER", "turn": 9}', encoding="utf-8"
+    )
+    snap = derive_state(str(state_dir), container_running=False, expected_run_id="OURS")
+    assert snap["phase"] == "ended"
+    assert snap["halt_class"] is None  # not "complete" — that was a different run
+    assert snap["live"] is False
+
+
 # --- derive_state: the SSE/template snapshot --------------------------------
 
 def test_derive_state_reads_structured_fields(tmp_path):

@@ -38,7 +38,7 @@ case "\$1" in
   create) echo "cid123"; exit 0 ;;
   cp) # \$2=src  \$3=dest : record the temp path and plant a pid-recording sleeper
       printf '%s' "\$3" >"$WS/last_dtmp"
-      printf 'import os,time\nopen(os.environ["VPIDFILE"],"w").write(str(os.getpid()))\ntime.sleep(30)\n' >"\$3"
+      printf 'import os,time\nopen(os.environ["VPIDFILE"],"w").write(str(os.getpid()))\ntime.sleep(float(os.environ.get("VSLEEP","30")))\n' >"\$3"
       exit 0 ;;
   rm) exit 0 ;;
   ps) exit 0 ;;
@@ -74,6 +74,20 @@ if [ -n "$vpid" ]; then
 else
   bad "viewer never launched when dashboard ON"
 fi
+cleanup
+
+# --- 1b. viewer ALREADY EXITED before teardown: exit code still 130 -----------
+# Regression: under `set -e`, a failing `kill` on the dead viewer pid in the EXIT
+# trap must not override the container's 130 (the `|| true` guard). VSLEEP makes the
+# viewer exit (~0.05s) well before the loop container returns (~0.5s).
+new_env
+export VSLEEP=0.05
+run_wrapper 1 >/dev/null 2>&1
+ec=$?
+unset VSLEEP
+[ "$ec" -eq 130 ] \
+  && ok "viewer-already-exited: 130 preserved (failed kill in trap doesn't clobber it)" \
+  || bad "viewer-already-exited exit was $ec (want 130 — trap kill failed under set -e?)"
 cleanup
 
 # --- 2. dashboard OFF (default): no viewer, container exit code still preserved -

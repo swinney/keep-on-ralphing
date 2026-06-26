@@ -76,17 +76,23 @@ def escape_field(value):
     return html.escape(str(value), quote=True)
 
 
-def classify_phase(current, container_running):
-    """The liveness decision (D4).
+def classify_phase(current, container_running, expected_run_id=None):
+    """The liveness decision (D4): run-id match AND container-running.
 
     Returns one of: none | starting | running | idle | paused | ended | killed.
       * no heartbeat            → "none"
+      * run_id != the latched live run → "ended" (stale leftover or replaced)
       * terminal halt class     → "ended" (the loop wrote why it stopped)
       * container running       → the live state ("paused" when a pause is recorded)
       * non-terminal + no container → "killed" (vanished without a terminal write)
     """
     if not current:
         return "none"
+    # Run-id fencing: once we've latched the live run's id, a current.json showing a
+    # DIFFERENT run means the run we track is gone (stale prior-run leftover, or a new
+    # loop replaced it) — never live. .ralph/ is never cleared, so this is the guard.
+    if expected_run_id and current.get("run_id") and current.get("run_id") != expected_run_id:
+        return "ended"
     state = current.get("state") or ""
     if state in TERMINAL_CLASSES:
         return "ended"
@@ -162,15 +168,20 @@ def ribbon_data(status_records, churn_fn=None):
     return nodes
 
 
-def derive_state(state_dir, container_running, tasks_path=None, now_epoch=None):
+def derive_state(state_dir, container_running, tasks_path=None, now_epoch=None,
+                 expected_run_id=None, current=None):
     """Derive the full dashboard snapshot from the structured state files + task list.
 
     Facts come from current.json / status.jsonl / tasks.md — never from log scraping
-    (the spec's "derives facts from structured state" requirement).
+    (the spec's "derives facts from structured state" requirement). expected_run_id
+    fences a stale/replaced run (D4); current may be passed in to avoid a re-read.
     """
-    current = read_json(os.path.join(state_dir, "current.json"))
-    phase = classify_phase(current, container_running)
+    if current is None:
+        current = read_json(os.path.join(state_dir, "current.json"))
+    phase = classify_phase(current, container_running, expected_run_id)
     cur = current or {}
+    # Only label a halt class when the ended record is THIS run's (not a stale leftover).
+    run_matches = (not expected_run_id) or (cur.get("run_id") == expected_run_id)
     if tasks_path is None:
         tasks_path = os.path.join(os.path.dirname(os.path.abspath(state_dir)), "tasks.md")
     return {
@@ -178,7 +189,7 @@ def derive_state(state_dir, container_running, tasks_path=None, now_epoch=None):
         "run_started": cur.get("run_started"),
         "phase": phase,
         "live": phase in _LIVE_PHASES,
-        "halt_class": cur.get("state") if phase == "ended" else None,
+        "halt_class": cur.get("state") if (phase == "ended" and run_matches) else None,
         "paused": cur.get("paused") if phase == "paused" else None,
         "turn": cur.get("turn") or 0,
         "task": cur.get("task") or "",
@@ -315,7 +326,16 @@ class _Handler(BaseHTTPRequestHandler):
     def _snapshot(self):
         s = self.server
         running = container_is_running(s.runtime, s.container)
-        snap = derive_state(s.state_dir, running, tasks_path=s.tasks_path)
+        current = read_json(os.path.join(s.state_dir, "current.json"))
+        # Latch the live run's id (D4): the first running, non-terminal run we see IS
+        # this run. The runner stamps a fresh run_id at startup, so the live loop's
+        # current.json carries a non-terminal state quickly; a later mismatch then
+        # reads as ended (stale leftover / replaced).
+        rid = (current or {}).get("run_id")
+        if running and rid and (current or {}).get("state") not in TERMINAL_CLASSES:
+            s.expected_run_id = rid
+        snap = derive_state(s.state_dir, running, tasks_path=s.tasks_path,
+                            expected_run_id=s.expected_run_id, current=current)
         snap["ribbon"] = ribbon_data(
             read_status(s.state_dir), churn_fn=lambda sha: git_churn(sha, cwd=s.workspace)
         )
@@ -334,7 +354,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/app.js":
             self._send(200, APP_JS.encode(), "application/javascript; charset=utf-8")
         elif path == "/state":
-            self._send(200, json.dumps(self._snapshot()).encode(), "application/json; charset=utf-8")
+            body = json.dumps(self._snapshot()).replace("<", "\\u003c").encode()
+            self._send(200, body, "application/json; charset=utf-8")
         elif path == "/events":
             self._stream_events()
         else:
@@ -351,7 +372,7 @@ class _Handler(BaseHTTPRequestHandler):
         stop = self.server.stop_event
         try:
             while not stop.is_set():
-                payload = json.dumps(self._snapshot())
+                payload = json.dumps(self._snapshot()).replace("<", "\\u003c")
                 if payload != last:
                     self.wfile.write(("data: " + payload + "\n\n").encode())
                     self.wfile.flush()
@@ -374,6 +395,7 @@ def make_server(state_dir, workspace, runtime, container, tasks_path=None, port=
     httpd.runtime = runtime
     httpd.container = container
     httpd.tasks_path = tasks_path
+    httpd.expected_run_id = None  # latched on the first running, non-terminal snapshot (D4)
     httpd.stop_event = threading.Event()
     httpd.allowed_hosts = frozenset(
         {"127.0.0.1:%d" % bound, "localhost:%d" % bound}
@@ -387,7 +409,9 @@ def _watch_teardown(server, grace=3):
     seen_live = False
     misses = 0
     while not server.stop_event.is_set():
-        if container_is_running(server.runtime, server.container):
+        rid = (read_json(os.path.join(server.state_dir, "current.json")) or {}).get("run_id")
+        replaced = bool(server.expected_run_id and rid and rid != server.expected_run_id)
+        if container_is_running(server.runtime, server.container) and not replaced:
             seen_live, misses = True, 0
         elif seen_live:
             misses += 1

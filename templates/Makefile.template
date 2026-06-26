@@ -118,7 +118,9 @@ if [ "$$dash" = 1 ]; then
     echo "ralph: RALPH_DASHBOARD=1 but host python3 not found - skipping dashboard" >&2
   fi
 fi
-trap '[ -n "$$dpid" ] && kill "$$dpid" 2>/dev/null; [ -n "$$dtmp" ] && rm -f "$$dtmp"' EXIT
+# `|| true` so a benign cleanup failure (viewer already exited → kill fails) never
+# overrides the container's exit code under `set -e` — preserves SIGINT → 130.
+trap '{ [ -n "$$dpid" ] && kill "$$dpid" 2>/dev/null; [ -n "$$dtmp" ] && rm -f "$$dtmp"; } || true' EXIT
 "$$rt" run --rm -it "$$@" --name "$$img" "$$img" ralph.sh
 endef
 export RALPH_LOOP_RUN

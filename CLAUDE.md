@@ -392,6 +392,6 @@ for the full steps. This project's values:
   automates it. No `@codex review` on `chore: archive` PRs.
 - **Don't-touch / gotchas:** the loop runner has ONE source — `base/scripts/` (never vendor into
   `templates/`/`example/`); `ralph.sh`/`until_reset.py` stay bash-3.2 / Python-3.7 portable on
-  purpose; `.ralph/` is gitignored. **Commit attribution is INVERTED from the global default:** this
-  repo's OWN commits carry `Co-Authored-By: Claude Opus 4.8` + `Claude-Session:` trailers, while
-  kit-EMITTED PROMPT artifacts carry NO AI attribution — don't conflate the two.
+  purpose; `.ralph/` is gitignored. **Commit attribution OVERRIDES the global default** (which is
+  none): this repo's OWN commits carry `Co-Authored-By: Claude Opus 4.8` + `Claude-Session:`
+  trailers, while kit-EMITTED PROMPT artifacts carry NO AI attribution — don't conflate the two.

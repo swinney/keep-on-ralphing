@@ -711,6 +711,14 @@ run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
 run_started="$(date -Is)"
 export RJ_RUN_ID="$run_id" RJ_RUN_STARTED="$run_started"
 
+# Stamp the live identity into current.json NOW — before any pre-turn work (base-
+# version read, the review-gate preflight) or a pre-turn SIGINT — so a reader can
+# fence stale prior-run state from the first moment, and a pre-turn halt annotates
+# THIS run, not the previous one. A fresh emit (full overwrite, not a merge) also
+# clears the prior run's blocked/paused/counters. state="starting": begun, no turn
+# yet. (Codex review, PR #26.) The lock is already held, so this run owns the slot.
+RJ_TURN="$turn" RJ_TASK="$(first_task)" RJ_STATE="starting" RJ_STARTED="$run_started" emit_status current
+
 base_version=$(cat "$base_version_file" 2>/dev/null | tr -d '[:space:]')
 narrate "ralph: base-version ${base_version:-unknown}"
 

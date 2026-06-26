@@ -43,7 +43,8 @@ the repo root, then read:
      stale prior-run state — report the loop as ended, not live. (Pair it with the
      terminal `state` below; a live `run_id` with no running container ⇒ the loop was
      **killed** — inferred, since a SIGKILL/OOM leaves no terminal write.)
-   - **`state`** is `running`/`idle` mid-loop, or a terminal **halt class** once the
+   - **`state`** is `starting` (run begun, turn 1 not yet underway — stamped before any
+     pre-turn work), `running`/`idle` mid-loop, or a terminal **halt class** once the
      loop ended: `complete` (project done / clean stop), `blocked`, `review-exhausted`,
      `stall`, or `sigint`. Report the halt class verbatim — never read a terminal state
      as "idle/still working".

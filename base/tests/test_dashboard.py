@@ -268,6 +268,27 @@ def test_server_state_endpoint_is_json_from_structured_files(tmp_path):
         server.shutdown()
 
 
+def test_run_id_latched_once_then_replacement_reads_ended(tmp_path, monkeypatch):
+    # P2 fix: the live run's id is latched ONCE. A new loop reusing the container
+    # name (fresh run_id) must read as a replacement (ended), not be re-adopted as live.
+    import ralph_dashboard as rd
+    monkeypatch.setattr(rd, "container_is_running", lambda *a, **k: True)
+    state_dir = _ralph(tmp_path, current={"state": "running", "run_id": "A", "turn": 1})
+    server, port = _serve(state_dir, tmp_path)
+    try:
+        d1 = json.loads(_get(port, "/state")[2])
+        assert d1["phase"] == "running" and server.expected_run_id == "A"  # latched A
+        (state_dir / "current.json").write_text(
+            json.dumps({"state": "running", "run_id": "B", "turn": 1}), encoding="utf-8"
+        )
+        d2 = json.loads(_get(port, "/state")[2])
+        assert server.expected_run_id == "A"   # NOT re-latched to B
+        assert d2["phase"] == "ended"          # B is a replacement, not the live run
+    finally:
+        server.stop_event.set()
+        server.shutdown()
+
+
 def test_server_events_emits_initial_snapshot(tmp_path):
     state_dir = _ralph(tmp_path, current={"state": "running", "run_id": "R1", "turn": 5})
     server, port = _serve(state_dir, tmp_path)

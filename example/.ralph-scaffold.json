@@ -3,7 +3,7 @@
   "files": {
     ".github/workflows/ci.yml": "647106ad7bd749ba8ce065b4a0b311fb0946da341759bb5bd0cf89da28210862",
     "Containerfile": "c700b3c14dede4d2028b35e34eb7b5406af869b5c844fb067a51caac8a5e3acb",
-    "Makefile": "610e6e49c157a83f609991e9b3bad47e32a9b321f33fda0f575c6b4cac06b647",
+    "Makefile": "691ee3d54994450af680ef7ae5a119b092b02d55e8732c27f6f965449980479c",
     "PROMPT.md": "1b3956001939a923a3bbc3b46b0df042c8c193beb003bab9ece30d7a7944c7d4",
     "STATUS.md": "7229854b6320b5685ec4544dae129b219a29acec84ad18318c5f14952df6f55a",
     "docs/operator-checklist.md": "75ac29657761ebe213b561bfef34797555520f15b9e32b608039bd268ee01d16",

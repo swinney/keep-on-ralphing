@@ -30,6 +30,7 @@ new_env() {
   mkdir -p "$STUB"
   : >"$WS/last_dtmp"
   : >"$WS/vpid"
+  : >"$WS/vargs"
   # Stub podman: create/cp plant a real sleeping "viewer", run simulates the loop
   # container exiting 130 (the SIGINT stop path).
   cat >"$STUB/podman" <<STUBEOF
@@ -38,7 +39,7 @@ case "\$1" in
   create) echo "cid123"; exit 0 ;;
   cp) # \$2=src  \$3=dest : record the temp path and plant a pid-recording sleeper
       printf '%s' "\$3" >"$WS/last_dtmp"
-      printf 'import os,time\nopen(os.environ["VPIDFILE"],"w").write(str(os.getpid()))\ntime.sleep(float(os.environ.get("VSLEEP","30")))\n' >"\$3"
+      printf 'import os,sys,time\nf=open(os.environ["VPIDFILE"],"w")\nf.write(str(os.getpid()))\nf.flush()\nf.close()\nopen(os.environ.get("VARGFILE","/dev/null"),"w").write(" ".join(sys.argv))\ntime.sleep(float(os.environ.get("VSLEEP","30")))\n' >"\$3"
       exit 0 ;;
   rm) exit 0 ;;
   ps) exit 0 ;;
@@ -52,7 +53,7 @@ cleanup() { [ -n "${WS:-}" ] && rm -rf "$WS"; }
 trap cleanup EXIT
 
 run_wrapper() { # args: <dash_env> ; uses PATH with the stub + real tools
-  ( cd "$WS" && PATH="$STUB:$PATH" VPIDFILE="$WS/vpid" \
+  ( cd "$WS" && PATH="$STUB:$PATH" VPIDFILE="$WS/vpid" VARGFILE="$WS/vargs" \
     bash -c "$WRAPPER" ralph_loop podman testimg "$WS" "$1" -v "$WS:/workspace" )
 }
 
@@ -116,6 +117,20 @@ printf '%s' "$out" | grep -qi "python3 not found" \
   || bad "no-python3 path did not warn/skip (got: $out)"
 [ ! -s "$WS/last_dtmp" ] && ok "no python3: no viewer extracted" \
   || bad "no-python3 path should not extract a viewer"
+cleanup
+
+# --- 5. RALPH_STATE_DIR / RALPH_TASKS from ralph.conf reach the viewer (P2/P3) -
+# The viewer must read the SAME files the runner writes, not a hardcoded .ralph/tasks.md.
+new_env
+printf 'RALPH_DASHBOARD=1\nRALPH_STATE_DIR=custom-state\nRALPH_TASKS=plan.md\n' >"$WS/ralph.conf"
+export VSLEEP=0.05
+run_wrapper "" >/dev/null 2>&1   # dash_env empty → resolved from ralph.conf
+unset VSLEEP
+args=$(cat "$WS/vargs" 2>/dev/null)
+{ printf '%s' "$args" | grep -q -- "--state-dir $WS/custom-state" \
+  && printf '%s' "$args" | grep -q -- "--tasks $WS/plan.md"; } \
+  && ok "viewer honors RALPH_STATE_DIR + RALPH_TASKS from ralph.conf" \
+  || bad "viewer args ignore conf state-dir/tasks (got: $args)"
 cleanup
 
 echo

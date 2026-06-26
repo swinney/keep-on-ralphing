@@ -332,7 +332,11 @@ class _Handler(BaseHTTPRequestHandler):
         # current.json carries a non-terminal state quickly; a later mismatch then
         # reads as ended (stale leftover / replaced).
         rid = (current or {}).get("run_id")
-        if running and rid and (current or {}).get("state") not in TERMINAL_CLASSES:
+        # Latch the live run's id ONCE. Re-latching every snapshot would adopt a
+        # REPLACING run's id (a new loop reusing the container name) as live and
+        # defeat the fencing — so only set it while still unlatched.
+        if (s.expected_run_id is None and running and rid
+                and (current or {}).get("state") not in TERMINAL_CLASSES):
             s.expected_run_id = rid
         snap = derive_state(s.state_dir, running, tasks_path=s.tasks_path,
                             expected_run_id=s.expected_run_id, current=current)

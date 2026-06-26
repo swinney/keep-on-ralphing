@@ -256,6 +256,69 @@ printf '%s' "$out" | grep -q "base-version unknown" \
   || bad "absent base-version did not narrate 'unknown'"
 cleanup
 
+# --- 13. each run stamps a distinct run-id (fences a reused .ralph/) ----------
+new_ws
+RALPH_ARGS="--once" run_ralph >/dev/null 2>&1
+id1=$(python3 -c "import json;print(json.load(open('$WS/.ralph/current.json')).get('run_id') or '')" 2>/dev/null)
+RALPH_ARGS="--once" run_ralph >/dev/null 2>&1
+id2=$(python3 -c "import json;print(json.load(open('$WS/.ralph/current.json')).get('run_id') or '')" 2>/dev/null)
+[ -n "$id1" ] && [ -n "$id2" ] && [ "$id1" != "$id2" ] \
+  && ok "each run stamps a distinct run_id (id1=$id1 id2=$id2)" \
+  || bad "run_id missing or not distinct (id1=$id1 id2=$id2)"
+cleanup
+
+# --- 14. stall halt records a terminal halt class in current.json ------------
+new_ws
+rm -f "$WS/STATUS.md"
+RALPH_ARGS="" RALPH_MAX_STALLS=2 run_ralph >/dev/null 2>&1
+st=$(python3 -c "import json;print(json.load(open('$WS/.ralph/current.json')).get('state') or '')" 2>/dev/null)
+[ "$st" = "stall" ] && ok "stall halt records state=stall" || bad "stall halt state was '$st' (want stall)"
+cleanup
+
+# --- 15. completion via STATUS.md records state=complete (≠ idle) ------------
+new_ws
+cat >"$STUB/count-1.sh" <<'S'
+printf 'RALPH: project complete\n' >STATUS.md
+git commit --allow-empty -qm done
+S
+RALPH_ARGS="" run_ralph >/dev/null 2>&1
+st=$(python3 -c "import json;print(json.load(open('$WS/.ralph/current.json')).get('state') or '')" 2>/dev/null)
+[ "$st" = "complete" ] && ok "STATUS.md stop records state=complete" || bad "complete halt state was '$st' (want complete)"
+cleanup
+
+# --- 16. a usage-limit pause records paused{reason,until} in current.json ----
+# Observed mid-pause from a backgrounded loop: the record is written before the
+# wait and cleared when the turn replays, so we poll during the wait window.
+new_ws
+rm -f "$WS/STATUS.md"
+cat >"$STUB/count-1.sh" <<'S'
+echo "You've hit your session limit · resets soon"
+STUB_EXIT=1
+S
+( RALPH_ARGS="" RALPH_MAX_STALLS=2 RALPH_LIMIT_POLL=2 run_ralph >/dev/null 2>&1 ) &
+loop_pid=$!
+paused_reason=""; paused_until=""
+for _ in $(seq 1 15); do
+  read -r paused_reason paused_until < <(python3 -c "import json;d=json.load(open('$WS/.ralph/current.json'));p=d.get('paused') or {};print(p.get('reason') or '', p.get('until_epoch') or '')" 2>/dev/null)
+  [ -n "$paused_reason" ] && break
+  sleep 0.2
+done
+wait "$loop_pid" 2>/dev/null
+{ [ "$paused_reason" = "usage-limit" ] && [ -n "$paused_until" ]; } \
+  && ok "usage-limit pause records paused.reason + until_epoch ($paused_until)" \
+  || bad "paused record wrong (reason='$paused_reason' until='$paused_until')"
+cleanup
+
+# --- 17. stall pressure counters are promoted into current.json --------------
+new_ws
+rm -f "$WS/STATUS.md"
+RALPH_ARGS="" RALPH_MAX_STALLS=2 run_ralph >/dev/null 2>&1
+read -r s ms < <(python3 -c "import json;d=json.load(open('$WS/.ralph/current.json'));print(d.get('stalls'), d.get('max_stalls'))" 2>/dev/null)
+{ [ "$s" = "2" ] && [ "$ms" = "2" ]; } \
+  && ok "stall counters promoted to current.json (stalls=$s/max=$ms)" \
+  || bad "stall counters wrong (stalls=$s max=$ms)"
+cleanup
+
 echo
 echo "ralph.sh runner tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

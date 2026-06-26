@@ -53,8 +53,8 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
 
 # The loop machinery, baked onto PATH. This is the single source of the runner;
 # consumers get it from the image, never by vendoring scripts/.
-COPY scripts/ralph.sh scripts/until_reset.py scripts/ralph_prefix.py /usr/local/bin/
-RUN chmod +x /usr/local/bin/ralph.sh /usr/local/bin/until_reset.py /usr/local/bin/ralph_prefix.py
+COPY scripts/ralph.sh scripts/until_reset.py scripts/ralph_prefix.py scripts/ralph_dashboard.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/ralph.sh /usr/local/bin/until_reset.py /usr/local/bin/ralph_prefix.py /usr/local/bin/ralph_dashboard.py
 
 # Provenance stamp: the content hash of the runner sources + this Containerfile,
 # computed by base/scripts/base_version.sh and passed via --build-arg. Baked as a

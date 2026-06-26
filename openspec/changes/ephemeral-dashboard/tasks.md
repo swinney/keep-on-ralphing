@@ -27,16 +27,16 @@ the viewer on top of it. Each implementation task is test-first per the project'
 
 ## 4. Phase 2 — The viewer (single-sourced, stdlib-only)
 
-- [ ] 4.1 State-derivation module + failing fixture tests: read `current.json`/`status.jsonl`/`tasks.md`; compute liveness from run-id match AND container-running; fence stale prior-run records; classify paused / terminal-halt / running / killed-inferred
-- [ ] 4.2 Commit-Ribbon data: per-turn node (committed vs stall) weighted by diff churn from `git show --numstat <sha>` computed host-side (tested against a git fixture)
-- [ ] 4.3 HTML-escape every agent-authored field (commit subject, `blocked_reason`, log/turn text) on the path into the page — tested with hostile-markup fixtures
-- [ ] 4.4 `ThreadingHTTPServer` subclass: `daemon_threads = True`, per-write `BrokenPipe`/`ConnectionReset` handling, periodic heartbeat comment line
-- [ ] 4.5 SSE endpoint: on every (re)connect re-derive full state from the files, then stream deltas (no Last-Event-ID); verify a simulated reconnect re-syncs without a gap
-- [ ] 4.6 Bind `127.0.0.1:0`, read the OS-assigned port, print one unmissable URL line AND write it to the chosen URL file
-- [ ] 4.7 `Host`-header validation (reject non-loopback-bind hosts) + a restrictive CSP header — tested
-- [ ] 4.8 Auto-open off by default, `$BROWSER`-respecting when explicitly enabled
-- [ ] 4.9 Front-end (stdlib-served static page): Commit-Ribbon centerpiece, X/N task arc, a stakes strip that lights only when live (rate-limit countdown, stall-pressure meter, review-round pips), `live.log` as a collapsible drawer — and NO gate-stage pills
-- [ ] 4.10 Self-teardown if the live run-id/container disappears (covers the `kill -9` / orphan case)
+- [x] 4.1 State-derivation module + failing fixture tests: read `current.json`/`status.jsonl`/`tasks.md`; compute liveness from run-id match AND container-running; fence stale prior-run records; classify paused / terminal-halt / running / killed-inferred
+- [x] 4.2 Commit-Ribbon data: per-turn node (committed vs stall) weighted by diff churn from `git show --numstat <sha>` computed host-side (tested against a git fixture)
+- [x] 4.3 HTML-escape every agent-authored field (commit subject, `blocked_reason`, log/turn text) on the path into the page — tested with hostile-markup fixtures
+- [x] 4.4 `ThreadingHTTPServer` subclass: `daemon_threads = True`, per-write `BrokenPipe`/`ConnectionReset` handling, periodic heartbeat comment line
+- [x] 4.5 SSE endpoint: on every (re)connect re-derive full state from the files, then stream deltas (no Last-Event-ID); verify a simulated reconnect re-syncs without a gap
+- [x] 4.6 Bind `127.0.0.1:0`, read the OS-assigned port, print one unmissable URL line AND write it to the chosen URL file
+- [x] 4.7 `Host`-header validation (reject non-loopback-bind hosts) + a restrictive CSP header — tested
+- [x] 4.8 Auto-open off by default, `$BROWSER`-respecting when explicitly enabled
+- [x] 4.9 Front-end (stdlib-served static page): Commit-Ribbon centerpiece, X/N task arc, a stakes strip that lights only when live (rate-limit countdown, stall-pressure meter, review-round pips), `live.log` as a collapsible drawer — and NO gate-stage pills
+- [x] 4.10 Self-teardown if the live run-id/container disappears (covers the `kill -9` / orphan case)
 
 ## 5. Phase 2 — Launch & teardown wiring
 

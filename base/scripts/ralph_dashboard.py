@@ -18,11 +18,17 @@ with a vanished container is "killed" — inferred, never shown as running.
 
 from __future__ import annotations
 
+import argparse
 import html
 import json
 import os
 import re
 import subprocess
+import threading
+import time
+import urllib.parse
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # The terminal halt classes the runner writes in its EXIT trap (Phase 1). A state in
 # this set means the loop ENDED and names why; anything else is a live/pre-turn state.
@@ -188,3 +194,336 @@ def derive_state(state_dir, container_running, tasks_path=None, now_epoch=None):
         "review_max": cur.get("review_max") or 0,
         "task_progress": parse_task_progress(tasks_path),
     }
+
+
+def tail_live_log(state_dir, limit=200):
+    """Last `limit` RAW lines of the aggregate log, for the activity drawer only.
+
+    Returns raw text — callers escape on the way into HTML (render_page) or render via
+    textContent (the JS). The log feeds ONLY the activity view, never structured facts
+    (the spec's "aggregate log feeds only the activity view" requirement).
+    """
+    path = os.path.join(state_dir, "log", "live.log")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return []
+    return [ln.rstrip("\n") for ln in lines[-limit:]]
+
+
+# ============================================================================
+# HTTP / SSE server (D5/D6/D7/D11). Per D12 this plumbing is covered by a smoke
+# test + the security checks, not the pure-logic unit suite above.
+# ============================================================================
+
+# Restrictive CSP (D11): no external loads at all; scripts/styles only from us, the
+# SSE channel only to 'self'. Combined with escaping + textContent rendering, agent
+# text cannot execute or exfiltrate.
+CSP = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; "
+    "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"
+)
+SSE_POLL_SECONDS = 1.0
+SSE_HEARTBEAT_SECONDS = 15.0
+
+
+def container_is_running(runtime, container):
+    """True if the loop's container is up — the honest liveness source /ralph-status uses."""
+    if not runtime or not container:
+        return False
+    try:
+        out = subprocess.run(
+            [runtime, "ps", "--filter", "name=^" + re.escape(container) + "$",
+             "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return container in out.stdout.split()
+
+
+def render_page(snapshot):
+    """Server-render the initial page with EVERY agent-authored field escaped (D11), so
+    first paint and no-JS use are safe; the JS then live-updates via textContent."""
+    tp = snapshot.get("task_progress") or {"done": 0, "total": 0}
+    head = (
+        "<header><h1>Ralph</h1>"
+        "<span class=phase data-phase=\"" + escape_field(snapshot.get("phase")) + "\">"
+        + escape_field(snapshot.get("phase")) + "</span>"
+        "<span class=run>run " + escape_field(snapshot.get("run_id")) + "</span></header>"
+    )
+    sub = escape_field(snapshot.get("subject"))
+    meta = (
+        "<section id=meta>turn <b id=turn>" + escape_field(snapshot.get("turn")) + "</b>"
+        " · model <span id=model>" + escape_field(snapshot.get("model")) + "</span>"
+        " · tasks <b id=tasks>" + escape_field(tp["done"]) + "/" + escape_field(tp["total"]) + "</b>"
+        " · last <span id=subject>" + sub + "</span></section>"
+    )
+    activity = "\n".join(escape_field(ln) for ln in (snapshot.get("activity") or []))
+    body = (
+        head + meta
+        + "<section id=ribbon aria-label='commit ribbon'></section>"
+        + "<section id=stakes></section>"
+        + "<details id=logbox><summary>activity log</summary>"
+        + "<pre id=activity>" + activity + "</pre></details>"
+        # Escape "<" in the embedded JSON so agent text containing "</script>" cannot
+        # break out of the bootstrap block (< is still valid JSON).
+        + "<script type=application/json id=bootstrap>"
+        + json.dumps(snapshot).replace("<", "\\u003c") + "</script>"
+        + "<script src=/app.js></script>"
+    )
+    return (
+        "<!doctype html><html lang=en><head><meta charset=utf-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>Ralph dashboard</title><link rel=stylesheet href=/app.css></head>"
+        "<body>" + body + "</body></html>"
+    )
+
+
+class _DashboardServer(ThreadingHTTPServer):
+    daemon_threads = True  # teardown never hangs on a held SSE stream (D6)
+    allow_reuse_address = True
+
+
+class _Handler(BaseHTTPRequestHandler):
+    server_version = "ralph-dashboard"
+    protocol_version = "HTTP/1.0"  # connection-close per response; SSE reconnect = D5 resync
+
+    def log_message(self, *args):  # silence default stderr access logging
+        pass
+
+    def _host_ok(self):
+        # DNS-rebind defense (D11): only the loopback bind is an acceptable Host.
+        return self.headers.get("Host", "") in self.server.allowed_hosts
+
+    def _send(self, code, body=b"", ctype="text/html; charset=utf-8"):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Security-Policy", CSP)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def _snapshot(self):
+        s = self.server
+        running = container_is_running(s.runtime, s.container)
+        snap = derive_state(s.state_dir, running, tasks_path=s.tasks_path)
+        snap["ribbon"] = ribbon_data(
+            read_status(s.state_dir), churn_fn=lambda sha: git_churn(sha, cwd=s.workspace)
+        )
+        snap["activity"] = tail_live_log(s.state_dir, 200)
+        return snap
+
+    def do_GET(self):
+        if not self._host_ok():
+            self._send(403, b"forbidden host\n", "text/plain; charset=utf-8")
+            return
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/":
+            self._send(200, render_page(self._snapshot()).encode())
+        elif path == "/app.css":
+            self._send(200, APP_CSS.encode(), "text/css; charset=utf-8")
+        elif path == "/app.js":
+            self._send(200, APP_JS.encode(), "application/javascript; charset=utf-8")
+        elif path == "/state":
+            self._send(200, json.dumps(self._snapshot()).encode(), "application/json; charset=utf-8")
+        elif path == "/events":
+            self._stream_events()
+        else:
+            self._send(404, b"not found\n", "text/plain; charset=utf-8")
+
+    def _stream_events(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Security-Policy", CSP)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        last = None
+        last_beat = time.monotonic()
+        stop = self.server.stop_event
+        try:
+            while not stop.is_set():
+                payload = json.dumps(self._snapshot())
+                if payload != last:
+                    self.wfile.write(("data: " + payload + "\n\n").encode())
+                    self.wfile.flush()
+                    last = payload
+                    last_beat = time.monotonic()
+                elif time.monotonic() - last_beat > SSE_HEARTBEAT_SECONDS:
+                    self.wfile.write(b": heartbeat\n\n")  # detect dead one-way client (D6)
+                    self.wfile.flush()
+                    last_beat = time.monotonic()
+                stop.wait(SSE_POLL_SECONDS)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return  # client tab closed — reap quietly (D6)
+
+
+def make_server(state_dir, workspace, runtime, container, tasks_path=None, port=0):
+    httpd = _DashboardServer(("127.0.0.1", port), _Handler)
+    bound = httpd.server_address[1]
+    httpd.state_dir = state_dir
+    httpd.workspace = workspace
+    httpd.runtime = runtime
+    httpd.container = container
+    httpd.tasks_path = tasks_path
+    httpd.stop_event = threading.Event()
+    httpd.allowed_hosts = frozenset(
+        {"127.0.0.1:%d" % bound, "localhost:%d" % bound}
+    )
+    return httpd
+
+
+def _watch_teardown(server, grace=3):
+    """Defense-in-depth (D8/4.10): if the loop container vanishes (kill -9, where the
+    Makefile trap never ran), shut the viewer down so no orphan listener lingers."""
+    seen_live = False
+    misses = 0
+    while not server.stop_event.is_set():
+        if container_is_running(server.runtime, server.container):
+            seen_live, misses = True, 0
+        elif seen_live:
+            misses += 1
+            if misses >= grace:
+                server.stop_event.set()
+                threading.Thread(target=server.shutdown, daemon=True).start()
+                return
+        server.stop_event.wait(2)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Ephemeral Ralph loop dashboard (host-side).")
+    ap.add_argument("--state-dir", default=".ralph")
+    ap.add_argument("--workspace", default=".")
+    ap.add_argument("--runtime", default="podman")
+    ap.add_argument("--container", default="ralph-loop")
+    ap.add_argument("--tasks", default=None)
+    ap.add_argument("--url-file", default=None)
+    ap.add_argument("--open", action="store_true", help="open a browser (default off; $BROWSER-respecting)")
+    ap.add_argument("--port", type=int, default=0)
+    args = ap.parse_args(argv)
+
+    server = make_server(args.state_dir, args.workspace, args.runtime, args.container,
+                         tasks_path=args.tasks, port=args.port)
+    port = server.server_address[1]
+    url = "http://127.0.0.1:%d" % port
+    print("Dashboard: " + url, flush=True)
+    url_file = args.url_file or os.path.join(args.state_dir, "dashboard.url")
+    try:
+        os.makedirs(os.path.dirname(url_file) or ".", exist_ok=True)
+        with open(url_file, "w", encoding="utf-8") as f:
+            f.write(url + "\n")
+    except OSError:
+        pass
+    if args.open:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    threading.Thread(target=_watch_teardown, args=(server,), daemon=True).start()
+    try:
+        server.serve_forever(poll_interval=0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop_event.set()
+    return 0
+
+
+APP_CSS = """
+:root{--bg:#0b0e14;--fg:#c8d3e0;--dim:#5b6b80;--ok:#3fb950;--hollow:#26303d;
+--warn:#d29922;--bad:#f85149;--accent:#58a6ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+header{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid #1b2230}
+header h1{margin:0;font-size:16px;letter-spacing:.18em;color:var(--accent)}
+.phase{padding:2px 10px;border-radius:999px;background:#1b2230;text-transform:uppercase;font-size:11px;letter-spacing:.1em}
+.phase[data-phase=running],.phase[data-phase=starting]{background:#11331d;color:var(--ok)}
+.phase[data-phase=paused]{background:#3a2d0a;color:var(--warn)}
+.phase[data-phase=ended]{background:#1b2230;color:var(--dim)}
+.phase[data-phase=killed],.phase[data-phase=blocked]{background:#3a1414;color:var(--bad)}
+.run{margin-left:auto;color:var(--dim);font-size:12px}
+#meta{padding:12px 18px;color:var(--dim)}#meta b{color:var(--fg)}
+#ribbon{display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap;padding:18px;min-height:80px}
+.node{width:14px;border-radius:3px;background:var(--hollow);position:relative}
+.node.commit{background:var(--ok)}
+.node:hover::after{content:attr(data-tip);position:absolute;bottom:100%;left:0;white-space:nowrap;
+background:#1b2230;color:var(--fg);padding:4px 8px;border-radius:4px;font-size:11px;z-index:2}
+#stakes{display:flex;gap:22px;padding:6px 18px 16px;flex-wrap:wrap;color:var(--dim)}
+#stakes .gone{display:none}
+.meter{height:6px;width:120px;background:var(--hollow);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle}
+.meter>span{display:block;height:100%;background:var(--warn)}
+.pip{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--hollow);margin-left:3px}
+.pip.on{background:var(--accent)}
+#logbox{margin:0 18px 24px;border:1px solid #1b2230;border-radius:6px}
+#logbox summary{cursor:pointer;padding:8px 12px;color:var(--dim)}
+#activity{margin:0;padding:12px;max-height:320px;overflow:auto;white-space:pre-wrap;font-size:12px;color:#9fb0c3}
+"""
+
+APP_JS = r"""
+'use strict';
+function $(id){return document.getElementById(id);}
+function txt(el,v){if(el)el.textContent=(v==null?'':String(v));}
+function render(s){
+  if(!s)return;
+  var ph=document.querySelector('.phase');
+  if(ph){ph.dataset.phase=s.phase||'';txt(ph,s.phase||'');}
+  txt($('turn'),s.turn);txt($('model'),s.model);txt($('subject'),s.subject||'—');
+  var tp=s.task_progress||{done:0,total:0};txt($('tasks'),tp.done+'/'+tp.total);
+  // Commit Ribbon: filled node on a commit, hollow on a stall, height scaled by churn.
+  var rb=$('ribbon');rb.textContent='';
+  var nodes=s.ribbon||[],max=1;
+  nodes.forEach(function(n){if(n.churn>max)max=n.churn;});
+  nodes.forEach(function(n){
+    var d=document.createElement('div');
+    d.className='node'+(n.committed?' commit':'');
+    var h=n.committed?(18+Math.round(46*Math.min(1,n.churn/max))):14;
+    d.style.height=h+'px';
+    d.setAttribute('data-tip','turn '+n.turn+(n.committed?(' · '+(n.sha||'')+' · +'+n.churn+' lines · '+(n.subject||'')):' · stall'));
+    rb.appendChild(d);
+  });
+  // Stakes strip — lit only when the loop is live.
+  var stk=$('stakes');stk.textContent='';
+  if(s.live){
+    if(s.paused&&s.paused.until_epoch){
+      var secs=Math.max(0,s.paused.until_epoch-Math.floor(Date.now()/1000));
+      var m=Math.floor(secs/60),ss=secs%60;
+      stk.appendChild(chip('paused ('+s.paused.reason+') resumes in '+m+'m'+(ss<10?'0':'')+ss+'s'));
+    }
+    stk.appendChild(meter('stalls',s.stalls,s.max_stalls));
+    if(s.review_max){stk.appendChild(pips('review',s.review_round,s.review_max));}
+  }
+  // Activity feed via textContent — agent text is inert regardless of content (D11).
+  if(Array.isArray(s.activity)){$('activity').textContent=s.activity.join('\n');}
+}
+function chip(t){var e=document.createElement('span');e.textContent=t;return e;}
+function meter(label,v,max){
+  var wrap=document.createElement('span');wrap.appendChild(document.createTextNode(label+' '+v+'/'+max+' '));
+  var m=document.createElement('span');m.className='meter';var f=document.createElement('span');
+  f.style.width=(max?Math.min(100,100*v/max):0)+'%';m.appendChild(f);wrap.appendChild(m);return wrap;
+}
+function pips(label,v,max){
+  var wrap=document.createElement('span');wrap.appendChild(document.createTextNode(label+' '));
+  for(var i=0;i<max;i++){var p=document.createElement('span');p.className='pip'+(i<v?' on':'');wrap.appendChild(p);}
+  return wrap;
+}
+try{render(JSON.parse($('bootstrap').textContent));}catch(e){}
+function connect(){
+  var es=new EventSource('/events');
+  es.onmessage=function(ev){try{render(JSON.parse(ev.data));}catch(e){}};
+  es.onerror=function(){es.close();setTimeout(connect,2000);}; // D5: reconnect re-syncs
+}
+connect();
+setInterval(function(){ // keep the rate-limit countdown ticking between snapshots
+  var el=document.querySelector('#stakes span');if(el&&/resumes in/.test(el.textContent)){
+    fetch('/state').then(function(r){return r.json();}).then(render).catch(function(){});
+  }
+},1000);
+"""
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

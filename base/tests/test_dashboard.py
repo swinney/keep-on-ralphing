@@ -19,6 +19,7 @@ from ralph_dashboard import (  # noqa: E402
     derive_state,
     escape_field,
     git_churn,
+    make_server,
     parse_task_progress,
     ribbon_data,
 )
@@ -176,3 +177,88 @@ def test_git_churn_counts_changed_lines(tmp_path):
 
 def test_git_churn_bad_sha_is_zero(tmp_path):
     assert git_churn("nosuchsha", cwd=str(tmp_path)) == 0
+
+
+# --- server smoke + security (D11/D12): plumbing isn't unit-tested, but the
+# Host-header defense, CSP, and server-side escaping ARE (the security spec).
+# Uses a non-existent container, so liveness is "not running" with or without podman.
+
+import http.client  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+
+
+def _serve(state_dir, workspace):
+    server = make_server(str(state_dir), str(workspace), "podman", "ralph-none-xyz", port=0)
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
+    return server, server.server_address[1]
+
+
+def _get(port, path, host=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("GET", path, headers={"Host": host or ("127.0.0.1:%d" % port)})
+    r = c.getresponse()
+    body = r.read()
+    headers = dict(r.getheaders())
+    c.close()
+    return r.status, headers, body
+
+
+def test_server_serves_page_with_csp_and_escapes_agent_text(tmp_path):
+    cur = {"state": "running", "run_id": "R1", "turn": 2, "subject": "<script>alert(1)</script>"}
+    state_dir = _ralph(tmp_path, current=cur, tasks="- [x] a\n- [ ] b\n")
+    server, port = _serve(state_dir, tmp_path)
+    try:
+        status, headers, body = _get(port, "/")
+        text = body.decode()
+        assert status == 200
+        assert "default-src 'none'" in headers.get("Content-Security-Policy", "")
+        assert "<script>alert(1)</script>" not in text  # hostile subject not live markup
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in text  # rendered inert
+    finally:
+        server.stop_event.set()
+        server.shutdown()
+
+
+def test_server_rejects_foreign_host(tmp_path):
+    state_dir = _ralph(tmp_path, current={"state": "running", "run_id": "R1"})
+    server, port = _serve(state_dir, tmp_path)
+    try:
+        status, _, _ = _get(port, "/", host="evil.example.com")
+        assert status == 403  # DNS-rebind defense
+    finally:
+        server.stop_event.set()
+        server.shutdown()
+
+
+def test_server_state_endpoint_is_json_from_structured_files(tmp_path):
+    state_dir = _ralph(tmp_path, current={"state": "idle", "run_id": "R1", "turn": 3})
+    server, port = _serve(state_dir, tmp_path)
+    try:
+        status, headers, body = _get(port, "/state")
+        data = json.loads(body)
+        assert status == 200 and "application/json" in headers.get("Content-Type", "")
+        assert data["turn"] == 3 and data["phase"] == "killed"  # container not running -> inferred
+    finally:
+        server.stop_event.set()
+        server.shutdown()
+
+
+def test_server_events_emits_initial_snapshot(tmp_path):
+    state_dir = _ralph(tmp_path, current={"state": "running", "run_id": "R1", "turn": 5})
+    server, port = _serve(state_dir, tmp_path)
+    try:
+        s = socket.create_connection(("127.0.0.1", port), timeout=5)
+        s.settimeout(5)
+        s.sendall(("GET /events HTTP/1.0\r\nHost: 127.0.0.1:%d\r\n\r\n" % port).encode())
+        buf = b""
+        while b'"turn": 5' not in buf:  # wait for the actual snapshot payload, not headers
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+        s.close()
+        assert b"data: " in buf and b'"turn": 5' in buf  # snapshot-on-connect (D5)
+    finally:
+        server.stop_event.set()
+        server.shutdown()

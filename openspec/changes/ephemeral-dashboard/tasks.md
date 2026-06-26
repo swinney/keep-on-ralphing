@@ -22,8 +22,8 @@ the viewer on top of it. Each implementation task is test-first per the project'
 
 ## 3. Phase 2 — Spike: resolve viewer placement (design D3)
 
-- [ ] 3.1 Spike D3a (host-side, viewer extracted from the image, host `python3`) vs D3b (in-container, loopback-published) end-to-end on a real loop; decide and record the choice + rationale in `design.md`
-- [ ] 3.2 Decide the URL-file location (`.ralph/dashboard.url` vs host cache) and confirm the bundled viewer adds nothing to `.ralph-scaffold.json`
+- [x] 3.1 Spike D3a (host-side, viewer extracted from the image, host `python3`) vs D3b (in-container, loopback-published) end-to-end on a real loop; decide and record the choice + rationale in `design.md` — **D3a** (extraction + host python3 validated on ralph-base:v1)
+- [x] 3.2 Decide the URL-file location (`.ralph/dashboard.url` vs host cache) and confirm the bundled viewer adds nothing to `.ralph-scaffold.json` — **`.ralph/dashboard.url`**; viewer is image-baked + extracted to a host temp path, never the project tree (no manifest entry)
 
 ## 4. Phase 2 — The viewer (single-sourced, stdlib-only)
 

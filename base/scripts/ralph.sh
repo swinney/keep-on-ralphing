@@ -25,6 +25,8 @@
 #   RALPH_AUTO_MERGE       1 to merge a PASSED PR; else park it for a human      (default: 0)
 #   RALPH_REVIEW_MAX_ROUNDS consecutive finding-producing rounds before halt     (default: 3)
 #   RALPH_BASE_BRANCH      PR base branch; empty = origin's default branch       (default: auto)
+#   RALPH_REPO             base repo (owner/name) for ALL gate gh pr calls;
+#                          empty = parse it from the origin remote URL            (default: auto)
 #   RALPH_REVIEWER         reviewer command (run as: <cmd> <pr-number>, prints
 #                          findings, empty = clean); empty = GitHub Copilot      (default: Copilot)
 #
@@ -435,6 +437,11 @@ PY
 # in the container. Review findings re-enter the agent's world only as text in
 # review-findings.md, which the scaffolded PROMPT.md tells it to resolve before
 # any tasks.md task. The verdict (zero findings AND green CI) is the only PASS.
+#
+# Every gh pr call here is pinned to OUR base repo (origin_repo / --repo) so a FORK
+# checkout opens and reviews the PR on the fork (origin), never gh's implicit base
+# repo (the fork's parent). RALPH_REPO=owner/name overrides; empty resolution omits
+# --repo (and a GitHub origin that won't parse is a loud, actionable error).
 review_findings="review-findings.md"
 REVIEW_GATE_HALT=0
 
@@ -451,16 +458,76 @@ base_branch() {
   printf '%s\n' "${d:-main}"
 }
 
+# Owner/name of the PR base repo, pinned to OUR origin so the gate never targets a
+# fork's parent. RALPH_REPO wins (env > ralph.conf > default); else parse origin's
+# URL. Empty output means "could not determine" — the caller then OMITS --repo (so
+# gh falls back to its own resolution) rather than emitting a broken `--repo ''`.
+# A non-GitHub / local-path remote (e.g. the test fixtures) yields empty by design.
+origin_repo() {
+  if [ -n "${RALPH_REPO:-}" ]; then
+    printf '%s\n' "$RALPH_REPO"
+    return
+  fi
+  git remote get-url origin 2>/dev/null |
+    sed -E 's#^git@github\.com:##; s#^ssh://git@github\.com/##; s#^https://github\.com/##; s#\.git$##' |
+    grep -E '^[^/[:space:]]+/[^/[:space:]]+$' || true
+}
+
+# Echo `--repo <owner/name>` words when origin_repo resolves, nothing otherwise.
+# Used to build a guarded array: empty repo => no flag, never `--repo ''`.
+repo_args_words() {
+  local repo
+  repo=$(origin_repo)
+  [ -n "$repo" ] && printf -- '--repo\n%s\n' "$repo"
+}
+
+# Fail loud when origin clearly points at GitHub but we could not parse owner/name —
+# letting gh silently fall back to the parent is exactly the fork bug this guards.
+# Echoes nothing on success; narrates and echoes "1" (a sentinel) when unparseable.
+github_repo_unresolved() {
+  [ -n "${RALPH_REPO:-}" ] && return 0
+  local url
+  url=$(git remote get-url origin 2>/dev/null) || return 0
+  case "$url" in
+    *github.com*)
+      if [ -z "$(origin_repo)" ]; then
+        narrate "ralph: review-gate could not parse a base repo (owner/name) from origin URL '$url' — set RALPH_REPO=owner/name"
+        echo 1
+      fi
+      ;;
+  esac
+}
+
 # Ensure a PR exists for the current branch; echo its number. Reuses an open one.
+# Pins every gh call to our origin (repo_args) so a fork checkout opens the PR on
+# the fork, not its parent. Distinguishes "no PR yet" (clean exit, empty output)
+# from "gh errored" (non-zero exit) so a transient/auth failure is narrated, not
+# misread as "no PR -> create". The create path captures combined output and
+# narrates it on failure — the create error is NEVER discarded.
 ensure_pr() {
-  local num
-  num=$(gh pr view --json number --jq .number 2>/dev/null)
+  local num out rc
+  local repo_args=()
+  while IFS= read -r w; do repo_args+=("$w"); done < <(repo_args_words)
+
+  num=$(gh pr view "${repo_args[@]}" --json number --jq .number 2>/tmp/.ralph_prview.$$)
+  rc=$?
+  out=$(cat /tmp/.ralph_prview.$$ 2>/dev/null); rm -f /tmp/.ralph_prview.$$
+  if [ "$rc" -ne 0 ] && [ -n "$out" ]; then
+    # Non-zero WITH stderr text is a real failure (the stub's "no PR" exits non-zero
+    # but writes nothing, so an empty-out non-zero stays the benign "no PR" path).
+    narrate "ralph: gh pr view failed: ${out}"
+    printf '%s\n' ""
+    return 0
+  fi
   if [ -z "$num" ]; then
-    gh pr create --base "$(base_branch)" --head "$(working_branch)" --fill \
-      --title "ralph: $(working_branch)" \
-      --body "Automated Ralph loop branch. Review input is the diff + repo state only." \
-      >/dev/null 2>&1
-    num=$(gh pr view --json number --jq .number 2>/dev/null)
+    if ! out=$(gh pr create "${repo_args[@]}" --base "$(base_branch)" --head "$(working_branch)" --fill \
+                 --title "ralph: $(working_branch)" \
+                 --body "Automated Ralph loop branch. Review input is the diff + repo state only." 2>&1); then
+      narrate "ralph: gh pr create FAILED: ${out}"
+      printf '%s\n' ""
+      return 0
+    fi
+    num=$(gh pr view "${repo_args[@]}" --json number --jq .number 2>/dev/null)
   fi
   printf '%s\n' "$num"
 }
@@ -477,24 +544,54 @@ request_review() {
   fi
   # v1 default: request a Copilot review, then read its comments as findings.
   # (Exact Copilot request API is pinned at implementation — see design Open Qs.)
-  gh pr edit "$num" --add-reviewer "@copilot" >/dev/null 2>&1 || true
-  gh pr view "$num" --json comments --jq '.comments[].body' 2>/dev/null |
-    grep -v '^[[:space:]]*$' || true
+  local repo_args=() out rc
+  while IFS= read -r w; do repo_args+=("$w"); done < <(repo_args_words)
+
+  if ! out=$(gh pr edit "$num" "${repo_args[@]}" --add-reviewer "@copilot" 2>&1); then
+    narrate "ralph: could not add reviewer to PR #$num: ${out}"
+  fi
+  # A FAILED comments fetch must NOT collapse into empty findings (that read as a
+  # clean review and produced a false PASS). Emit a synthetic finding instead so the
+  # gate cannot pass on an API error that merely looks like zero findings.
+  out=$(gh pr view "$num" "${repo_args[@]}" --json comments --jq '.comments[].body' 2>/tmp/.ralph_cmts.$$)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    local err
+    err=$(cat /tmp/.ralph_cmts.$$ 2>/dev/null); rm -f /tmp/.ralph_cmts.$$
+    echo "review fetch failed: ${err:-gh pr view --json comments exited $rc} — re-run the review"
+    return
+  fi
+  rm -f /tmp/.ralph_cmts.$$
+  printf '%s\n' "$out" | grep -v '^[[:space:]]*$' || true
 }
 
 # CI verdict for PR <num>: echo success|pending|failure. Read DIRECTLY from CI
 # (ground truth), never from a reviewer's claim. `gh pr checks` exits 0=all pass,
 # 8=pending, other=failing.
 ci_status() {
-  gh pr checks "$1" >/dev/null 2>&1
-  case $? in
+  local repo_args=() out rc
+  while IFS= read -r w; do repo_args+=("$w"); done < <(repo_args_words)
+  out=$(gh pr checks "$1" "${repo_args[@]}" 2>&1)
+  rc=$?
+  case $rc in
     0) echo success ;;
     8) echo pending ;;
-    *) echo failure ;;
+    *)
+      # Any other exit (auth/wrong-repo/network/"no checks") is reported as failure,
+      # but narrate the real gh message so it isn't indistinguishable from red checks.
+      narrate "ralph: gh pr checks for PR #$1 errored (exit $rc): ${out}"
+      echo failure ;;
   esac
 }
 
-merge_pr() { gh pr merge "$1" --merge >/dev/null 2>&1; }
+merge_pr() {
+  local repo_args=() out
+  while IFS= read -r w; do repo_args+=("$w"); done < <(repo_args_words)
+  if ! out=$(gh pr merge "$1" "${repo_args[@]}" --merge 2>&1); then
+    narrate "ralph: gh pr merge failed for PR #$1: ${out}"
+    return 1
+  fi
+}
 
 # Run the gate for the just-committed turn. Returns 0 to continue the loop; sets
 # REVIEW_GATE_HALT=1 (after writing STATUS.md) when the bounded rounds are spent.
@@ -502,9 +599,21 @@ merge_pr() { gh pr merge "$1" --merge >/dev/null 2>&1; }
 # wait below never reaches the stall check.
 run_review_gate() {
   REVIEW_GATE_HALT=0
-  local num status waited findings
-  git push -u origin "$(working_branch)" >/dev/null 2>&1 ||
-    narrate "ralph: review-gate could not push $(working_branch) to origin — check GH_TOKEN / remote (the PR may review stale commits)"
+  local num status waited findings push_out
+
+  # Fail loud, not silent-to-the-parent: a GitHub origin we can't parse into
+  # owner/name would let every un-flagged gh fall back to the fork's parent.
+  if [ -n "$(github_repo_unresolved)" ]; then
+    return 0
+  fi
+
+  # A failed push must ABORT the turn — reviewing a PR whose head is missing/stale
+  # is worse than skipping. Capture stderr so the operator sees the real reason
+  # (branch protection vs auth vs non-fast-forward) instead of a swallowed failure.
+  if ! push_out=$(git push -u origin "$(working_branch)" 2>&1); then
+    narrate "ralph: review-gate could not push $(working_branch) to origin — skipping review this turn: ${push_out}"
+    return 0
+  fi
   num=$(ensure_pr)
   if [ -z "$num" ]; then
     narrate "ralph: review-gate could not resolve a PR for $(working_branch) — skipping this turn"

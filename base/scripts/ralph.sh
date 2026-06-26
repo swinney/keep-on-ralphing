@@ -483,7 +483,9 @@ repo_args_words() {
 
 # Fail loud when origin clearly points at GitHub but we could not parse owner/name —
 # letting gh silently fall back to the parent is exactly the fork bug this guards.
-# Echoes nothing on success; narrates and echoes "1" (a sentinel) when unparseable.
+# Echoes nothing on success; echoes "1" (a sentinel) to stdout when unparseable.
+# The diagnostic narrate goes to STDERR — this fn is captured via `$(...)`, so a
+# stdout narrate would be swallowed into the substitution (invisible) and pollute it.
 github_repo_unresolved() {
   [ -n "${RALPH_REPO:-}" ] && return 0
   local url
@@ -491,7 +493,7 @@ github_repo_unresolved() {
   case "$url" in
     *github.com*)
       if [ -z "$(origin_repo)" ]; then
-        narrate "ralph: review-gate could not parse a base repo (owner/name) from origin URL '$url' — set RALPH_REPO=owner/name"
+        narrate "ralph: review-gate could not parse a base repo (owner/name) from origin URL '$url' — set RALPH_REPO=owner/name" >&2
         echo 1
       fi
       ;;
@@ -512,19 +514,21 @@ ensure_pr() {
   num=$(gh pr view "${repo_args[@]}" --json number --jq .number 2>/tmp/.ralph_prview.$$)
   rc=$?
   out=$(cat /tmp/.ralph_prview.$$ 2>/dev/null); rm -f /tmp/.ralph_prview.$$
-  if [ "$rc" -ne 0 ] && [ -n "$out" ]; then
-    # Non-zero WITH stderr text is a real failure (the stub's "no PR" exits non-zero
-    # but writes nothing, so an empty-out non-zero stays the benign "no PR" path).
-    narrate "ralph: gh pr view failed: ${out}"
-    printf '%s\n' ""
+  # A non-zero `pr view` is the BENIGN "no PR yet" case when stderr is empty OR says
+  # so — real gh prints "no ... pull requests found ..." and exits 1 on a branch with
+  # no PR, so fall through to create. Any OTHER non-zero (auth/wrong-repo/network) is
+  # a real error. CRITICAL: narrate to STDERR — this function's stdout IS the captured
+  # PR number (`num=$(ensure_pr)`), so a narrate on stdout would be read AS the PR
+  # number and the gate would run against error text. Return empty so the gate skips.
+  if [ "$rc" -ne 0 ] && [ -n "$out" ] && ! printf '%s' "$out" | grep -qiE 'no .*pull requests? found'; then
+    narrate "ralph: gh pr view failed: ${out}" >&2
     return 0
   fi
   if [ -z "$num" ]; then
     if ! out=$(gh pr create "${repo_args[@]}" --base "$(base_branch)" --head "$(working_branch)" --fill \
                  --title "ralph: $(working_branch)" \
                  --body "Automated Ralph loop branch. Review input is the diff + repo state only." 2>&1); then
-      narrate "ralph: gh pr create FAILED: ${out}"
-      printf '%s\n' ""
+      narrate "ralph: gh pr create FAILED: ${out}" >&2
       return 0
     fi
     num=$(gh pr view "${repo_args[@]}" --json number --jq .number 2>/dev/null)
@@ -548,7 +552,9 @@ request_review() {
   while IFS= read -r w; do repo_args+=("$w"); done < <(repo_args_words)
 
   if ! out=$(gh pr edit "$num" "${repo_args[@]}" --add-reviewer "@copilot" 2>&1); then
-    narrate "ralph: could not add reviewer to PR #$num: ${out}"
+    # >&2: request_review's stdout is captured as the findings list — a diagnostic on
+    # stdout would be mistaken for a review finding.
+    narrate "ralph: could not add reviewer to PR #$num: ${out}" >&2
   fi
   # A FAILED comments fetch must NOT collapse into empty findings (that read as a
   # clean review and produced a false PASS). Emit a synthetic finding instead so the
@@ -579,7 +585,9 @@ ci_status() {
     *)
       # Any other exit (auth/wrong-repo/network/"no checks") is reported as failure,
       # but narrate the real gh message so it isn't indistinguishable from red checks.
-      narrate "ralph: gh pr checks for PR #$1 errored (exit $rc): ${out}"
+      # >&2: ci_status's stdout is captured as the verdict (success|pending|failure) —
+      # a stdout narrate would pollute it.
+      narrate "ralph: gh pr checks for PR #$1 errored (exit $rc): ${out}" >&2
       echo failure ;;
   esac
 }

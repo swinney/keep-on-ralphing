@@ -82,7 +82,9 @@ echo "\$*" >>"$STUB/gh.log"
 case "\$*" in
   "auth status"*) exit 0 ;;
   *"pr view"*"--json number"*)
-    if [ -s "$STUB/pr_number" ]; then cat "$STUB/pr_number"; exit 0; else exit 1; fi ;;
+    # Real gh: a no-PR branch EXITS 1 WITH stderr "no open pull requests found ...",
+    # not a silent empty — the gate must read that as the create case, not an error.
+    if [ -s "$STUB/pr_number" ]; then cat "$STUB/pr_number"; exit 0; else echo "no pull requests found for branch \"feat\"" >&2; exit 1; fi ;;
   *"pr view"*"--json comments"*)
     ce=\$(cat "$STUB/comments_exit" 2>/dev/null || echo 0)
     if [ "\$ce" != 0 ]; then echo "comments fetch boom" >&2; exit "\$ce"; fi
@@ -416,6 +418,12 @@ printf '%s' "$out" | grep -qi "gh pr create" \
   && printf '%s' "$out" | grep -qi "create boom" \
   && ok "(A) a failed gh pr create narrates the captured gh error" \
   || bad "(A) create failure not surfaced (output lacked the captured gh error)"
+# Pollution guard: ensure_pr's diagnostics go to STDERR, so a failed create returns
+# an EMPTY num and the gate skips BEFORE ci_status — if narrate had leaked onto the
+# captured stdout, num would be the error text and `gh pr checks` would run on it.
+grep -q "pr checks" "$STUB/gh.log" \
+  && bad "(A) create failure ran 'pr checks' — narrate leaked into the captured PR number" \
+  || ok "(A) a failed create skips cleanly (no pr checks against a polluted num)"
 cleanup
 
 # --- 19. (B) RALPH_REPO override threads --repo into the gate's gh pr calls -----

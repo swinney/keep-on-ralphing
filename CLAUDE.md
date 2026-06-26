@@ -374,3 +374,24 @@ class, and also backstops scoped coverage's blind spot). When changing
 the template, keep this contract intact and keep the `{{PLACEHOLDER}}` set closed (fill
 every one, add none) — `/ralph-init` substitutes them. A wrong gate command (or
 threshold) is the most damaging thing the scaffold can emit.
+
+## Development Workflow
+
+For non-trivial changes, follow the two-loop spec-driven flow — invoke `/spec-driven-workflow`
+for the full steps. This project's values:
+
+- **Branch base / PR target:** branch from `main`; `gh pr create --repo swinney/keep-on-ralphing
+  --base main`. Never commit to `main` directly.
+- **Gate (must pass before commit):** `make test` — the full kit suite (it stubs `claude`/`gh`, so
+  a green local run faithfully predicts CI). No coverage threshold for the kit itself.
+- **Uses OpenSpec?** yes — `/opsx:*` (changes in `openspec/changes/`, archived into `openspec/specs/`).
+- **Release steps (two-channel, UNLINKED):** if `skills/` or `templates/` changed → bump
+  `.claude-plugin/plugin.json` (+ `/plugin update`); if `base/scripts/` or `base/Containerfile`
+  changed → rebuild the base image (`make build-base` + `make smoke-base`) on each loop machine.
+  Do the release as a separate post-merge `chore(release)` commit on `main`; `/release-ralph-harness`
+  automates it. No `@codex review` on `chore: archive` PRs.
+- **Don't-touch / gotchas:** the loop runner has ONE source — `base/scripts/` (never vendor into
+  `templates/`/`example/`); `ralph.sh`/`until_reset.py` stay bash-3.2 / Python-3.7 portable on
+  purpose; `.ralph/` is gitignored. **Commit attribution is INVERTED from the global default:** this
+  repo's OWN commits carry `Co-Authored-By: Claude Opus 4.8` + `Claude-Session:` trailers, while
+  kit-EMITTED PROMPT artifacts carry NO AI attribution — don't conflate the two.

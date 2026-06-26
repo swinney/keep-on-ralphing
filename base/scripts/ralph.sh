@@ -389,6 +389,24 @@ json.dump(d, open(p, "w"), indent=2)
 PY
 }
 
+# Clear the paused record the moment a wait ends, so a reader never sees "paused"
+# while the loop is actually working again. The per-turn emit_status overwrite also
+# clears it on a turn boundary, but a review-gate CI wait ends mid-turn (before the
+# next emit), so an explicit clear is needed there. Merge to preserve the heartbeat.
+clear_paused() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  RJ_STATE_DIR="$state_dir" python3 - <<'PY' 2>/dev/null || true
+import json, os, sys
+p = os.environ["RJ_STATE_DIR"] + "/current.json"
+try:
+    d = json.load(open(p))
+except Exception:
+    sys.exit(0)
+d["paused"] = None
+json.dump(d, open(p, "w"), indent=2)
+PY
+}
+
 # Refresh the promoted counters onto current.json the moment they change (a stall
 # increment, a reset, a new review round), so a reader sees the latest value without
 # waiting for the next turn's heartbeat — and so the value survives onto the halt
@@ -497,17 +515,25 @@ run_review_gate() {
   # cannot hang the loop forever. Reuses the limit_poll cadence.
   waited=0
   status=$(ci_status "$num")
+  if [ "$status" = pending ]; then
+    # Waiting on CI is a pause, not a hang. Record it so a reader shows "paused (CI)"
+    # rather than an apparent stall; until_epoch is a coarse upper bound (the full
+    # poll budget). Cleared when the gate proceeds (next turn's emit) or on halt.
+    persist_paused review-ci "$(($(date +%s) + ${RALPH_REVIEW_CI_MAX:-60} * limit_poll))"
+  fi
   while [ "$status" = pending ] && [ "$waited" -lt "${RALPH_REVIEW_CI_MAX:-60}" ]; do
     sleep "$limit_poll"
     waited=$((waited + 1))
     status=$(ci_status "$num")
   done
+  clear_paused # the CI wait is over (settled or budget spent) — no longer paused
 
   findings=$(request_review "$num")
 
   if [ -z "${findings//[[:space:]]/}" ] && [ "$status" = success ]; then
     : >"$review_findings"
     review_rounds=0
+    persist_counters # refresh the reset round immediately (parity with the fail path)
     narrate "ralph: review-gate PASS on PR #$num (clean review, CI green)"
     if [ "${RALPH_AUTO_MERGE:-0}" = 1 ]; then
       if merge_pr "$num"; then
@@ -681,7 +707,7 @@ trap 'echo; _sig="ralph: caught SIGINT at turn $turn, exiting"; echo "$_sig"; ha
 # once and export it so every emit_status / merge write carries it (the python
 # subprocesses inherit the exported RJ_RUN_* vars). $$ + UTC second is unique per
 # loop start; date +fmt is portable (GNU + BSD), unlike date -d arithmetic.
-run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
 run_started="$(date -Is)"
 export RJ_RUN_ID="$run_id" RJ_RUN_STARTED="$run_started"
 
@@ -755,6 +781,7 @@ while true; do
     narrate "ralph: usage limit hit at turn $turn (${reset:-reset time unknown}) — pausing ${wait_s}s, then retrying (not a stall)"
     persist_paused usage-limit "$(($(date +%s) + wait_s))"
     sleep "$wait_s"
+    clear_paused
     turn=$((turn - 1)) # replay this turn number — the task was not completed
     echo "$turn" >"$turn_file"
     continue

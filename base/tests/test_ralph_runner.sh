@@ -298,15 +298,19 @@ S
 ( RALPH_ARGS="" RALPH_MAX_STALLS=2 RALPH_LIMIT_POLL=2 run_ralph >/dev/null 2>&1 ) &
 loop_pid=$!
 paused_reason=""; paused_until=""
-for _ in $(seq 1 15); do
+for _ in $(seq 1 25); do
   read -r paused_reason paused_until < <(python3 -c "import json;d=json.load(open('$WS/.ralph/current.json'));p=d.get('paused') or {};print(p.get('reason') or '', p.get('until_epoch') or '')" 2>/dev/null)
   [ -n "$paused_reason" ] && break
+  kill -0 "$loop_pid" 2>/dev/null || break # loop ended before we observed a pause
   sleep 0.2
 done
 wait "$loop_pid" 2>/dev/null
 { [ "$paused_reason" = "usage-limit" ] && [ -n "$paused_until" ]; } \
   && ok "usage-limit pause records paused.reason + until_epoch ($paused_until)" \
   || bad "paused record wrong (reason='$paused_reason' until='$paused_until')"
+# ...and the record is cleared once the loop is no longer paused (resume/halt).
+cleared=$(python3 -c "import json;print(json.load(open('$WS/.ralph/current.json')).get('paused') is None)" 2>/dev/null)
+[ "$cleared" = "True" ] && ok "paused record is cleared once the wait ends" || bad "paused not cleared (got '$cleared')"
 cleanup
 
 # --- 17. stall pressure counters are promoted into current.json --------------
@@ -317,6 +321,23 @@ read -r s ms < <(python3 -c "import json;d=json.load(open('$WS/.ralph/current.js
 { [ "$s" = "2" ] && [ "$ms" = "2" ]; } \
   && ok "stall counters promoted to current.json (stalls=$s/max=$ms)" \
   || bad "stall counters wrong (stalls=$s max=$ms)"
+cleanup
+
+# --- 18. new lifecycle fields are ADDITIVE — base heartbeat fields survive ----
+new_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+RALPH_ARGS="--once" run_ralph >/dev/null 2>&1
+python3 - "$WS/.ralph/current.json" <<'PY' && ok "lifecycle fields are additive (base heartbeat fields preserved)" || bad "a base heartbeat field was dropped"
+import json, sys
+d = json.load(open(sys.argv[1]))
+base = ["turn", "task", "model", "state", "started", "committed", "sha"]
+new  = ["run_id", "run_started", "stalls", "max_stalls"]
+missing = [k for k in base + new if k not in d]
+good = (not missing) and d["turn"] >= 1 and d["committed"] is True and bool(d["run_id"])
+sys.exit(0 if good else 1)
+PY
 cleanup
 
 echo

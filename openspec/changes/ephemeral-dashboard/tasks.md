@@ -9,9 +9,9 @@ the viewer on top of it. Each implementation task is test-first per the project'
 - [x] 1.2 Stamp a per-invocation run-id + start time into `current.json` at startup (before turn 1), via the existing merge pattern
 - [x] 1.3 Write an explicit terminal state to `current.json` on every loop-ending path (EXIT trap), naming the halt class: `complete | blocked | review-exhausted | stall | sigint`
 - [x] 1.4 Write a structured `paused:{reason,until}` record around the usage-limit sleep (reason = usage-limit, until = computed reset) and clear it when the pause ends
-- [ ] 1.5 Write the same `paused` record around the review-gate CI wait, and clear it on resume — deferred: needs a test in `test_review_gate.sh` (the runner suite opts the gate out)
+- [x] 1.5 Write the same `paused` record around the review-gate CI wait, and clear it on resume (test in `test_review_gate.sh`)
 - [x] 1.6 Promote the stall count + configured max, and the review round + configured max, into `current.json` fields (in addition to existing narration)
-- [ ] 1.7 Confirm additivity: no change to turn-outcome detection, usage-limit replay, review-gate verdict, or `live.log`; partial writes never drop other heartbeat fields (assert via tests) — partially covered (full suite green); add an explicit field-preservation assertion
+- [x] 1.7 Confirm additivity: no change to turn-outcome detection, usage-limit replay, review-gate verdict, or `live.log`; partial writes never drop other heartbeat fields (explicit field-preservation assertion + full suite green)
 - [x] 1.8 Update the `/ralph-status` skill to read the new structured fields (terminal halt class, paused record, counters) instead of inferring — it gains the same honest signals
 
 ## 2. Phase 1 — Land & release

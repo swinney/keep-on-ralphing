@@ -377,8 +377,12 @@ threshold) is the most damaging thing the scaffold can emit.
 
 ## Development Workflow
 
-For non-trivial changes, follow the two-loop spec-driven flow — invoke `/spec-driven-workflow`
-for the full steps. This project's values:
+For non-trivial changes, follow the two-loop spec-driven flow — plan/spec (Loop 1), then
+implement test-first (Loop 2). The concrete commands this repo ships are `/opsx:*` (explore →
+propose → apply → archive, in `.claude/commands/opsx/`); the generic flow is also codified in the
+author's personal `/spec-driven-workflow` skill (synced across the author's machines), but this
+repo does NOT depend on it — a fresh checkout has everything it needs in `/opsx:*` plus the values
+below. This project's values:
 
 - **Branch base / PR target:** branch from `main`; `gh pr create --repo swinney/keep-on-ralphing
   --base main`. Never commit to `main` directly.

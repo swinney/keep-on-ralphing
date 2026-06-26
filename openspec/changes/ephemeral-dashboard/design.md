@@ -91,6 +91,17 @@ achievable *together with* auto-launch. A `/ralph-dashboard` skill (which *can* 
 root) is a possible complement for attaching to an already-running loop, but not the primary path.
 Resolve D3a-vs-D3b with a short spike before building the viewer.
 
+**Resolved (Phase 2 spike) → D3a (host-side, viewer extracted from the image).** Validated on a real
+`ralph-base:v1`: `podman create` + `podman cp` + `podman rm` extracts a baked file to a host temp path
+**without running the container**, and host `python3` (3.14.5) executes the extracted script. The
+workspace is bind-mounted (`-v $(WORKSPACE):/workspace`), so `.ralph/` is host-native at
+`$(WORKSPACE)/.ralph/` — the host viewer reads it directly, no mount. D3a keeps the container strictly
+**port-free** (the kit's "log source, not a service" stance), lets the viewer bind `127.0.0.1:0` and
+print its own URL directly (no `podman port` gymnastics against a foreground container), and gives a
+clean host-trap teardown. D3b was rejected: surfacing an OS-assigned host port out of a foreground
+`podman run` is raced/fiddly and softens the no-port stance. D3a's only cost — host `python3` — is
+satisfied here and degrades gracefully (skip-with-warning) when absent, per the dashboard spec.
+
 ### D4 — Liveness = run-id match AND container-running
 The viewer determines "is this loop live?" from the **run-id** (matches the launch) combined with
 whether the loop container is actually running (`podman ps`, the same honest source `/ralph-status`
@@ -179,13 +190,15 @@ structurally (analogous to image contents covered by a smoke check, not the unit
 3. **Rollback:** `RALPH_DASHBOARD` off disables Phase 2 entirely; Phase 1 fields are harmless if
    nothing reads them.
 
-## Open Questions
+## Open Questions (resolved at Phase 2 kickoff)
 
-- **D3a vs D3b** — host-side image-extraction vs in-container loopback-publish. The one decision to
-  resolve with a short spike before building the viewer; it determines the `Makefile` wiring and the
-  host-`python3` assumption.
-- **URL file location** — `.ralph/dashboard.url` (travels with the workspace, gitignored) vs a host
-  cache path (`~/.cache/ralph/`). The former is simpler and consistent with `.ralph/`; the latter is
-  better for a future per-host index.
-- **Is the bundled viewer worth it vs the recipe fallback?** Decide explicitly at Phase 2 kickoff
-  using the proportionality note — Phase 1 proceeds either way.
+- **D3a vs D3b** — **RESOLVED → D3a** (host-side image-extraction). See the D3 resolution above; the
+  spike validated the extraction mechanic and host `python3`, and D3a preserves the no-port stance.
+- **URL file location** — **RESOLVED → `.ralph/dashboard.url`** (travels with the workspace, already
+  gitignored, consistent with the rest of `.ralph/`). A host cache path (`~/.cache/ralph/`) is the
+  better substrate for a future per-host index (D10) but is not needed for the per-loop v1; the
+  run-id/epoch in the URL file keeps that follow-up non-breaking.
+- **Is the bundled viewer worth it vs the recipe fallback?** **Yes for v1**, gated by opt-in
+  (default-off) + Phase 1 standing alone: the marginal cost is one stdlib-only baked file extracted at
+  launch and a small Makefile wrapper, with the copy-paste recipe (D2) retained as the documented
+  fallback if the viewer is later judged not worth the upkeep.

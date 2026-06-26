@@ -30,9 +30,9 @@ test:
 # after `build-base`. Asserts the runner's tools are on PATH inside $(BASE_IMAGE).
 smoke-base:
 	@$(RUNTIME) run --rm $(BASE_IMAGE) sh -c '\
-	  for t in gh git ralph.sh until_reset.py ralph_prefix.py; do \
+	  for t in gh git ralph.sh until_reset.py ralph_prefix.py ralph_dashboard.py; do \
 	    command -v $$t >/dev/null 2>&1 || { echo "smoke-base FAIL: $$t missing from $(BASE_IMAGE)"; exit 1; }; \
-	  done; echo "smoke-base OK: gh=$$(gh --version | head -1), git, ralph.sh, until_reset.py, ralph_prefix.py present"'
+	  done; echo "smoke-base OK: gh=$$(gh --version | head -1), git, ralph.sh, until_reset.py, ralph_prefix.py, ralph_dashboard.py present"'
 	@# Provenance stamp: the baked file + LABEL must be present and equal to the source hash.
 	@want=$$(bash base/scripts/base_version.sh); \
 	  [ -n "$$want" ] || { echo "smoke-base FAIL: could not compute source stamp"; exit 1; }; \

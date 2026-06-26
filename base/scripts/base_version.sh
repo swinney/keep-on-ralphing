@@ -19,7 +19,7 @@ base=$(cd "$here/.." && pwd)
 
 # Fixed list (NOT a glob) so the input set is deterministic and never silently
 # grows to include tests/helpers.
-files="scripts/ralph.sh scripts/until_reset.py scripts/ralph_prefix.py Containerfile"
+files="scripts/ralph.sh scripts/until_reset.py scripts/ralph_prefix.py scripts/ralph_dashboard.py Containerfile"
 
 if command -v sha256sum >/dev/null 2>&1; then
   sha() { sha256sum; }

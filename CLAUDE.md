@@ -189,6 +189,17 @@ both required in one release.
   `current.json` (heartbeat), `status.jsonl` (one git-derived record per completed turn),
   `log/turn-<n>.txt` (line-buffered per-turn output), `turn` (counter). The
   `/ralph-status` skill reads these directly — there is no shipped status script.
+- **Honest lifecycle signals (`loop-lifecycle-state` capability).** So *any* reader (the
+  dashboard, `/ralph-status`, the notify seam) can represent the loop faithfully, the runner
+  stamps `current.json` with: a per-invocation **`run_id` + `run_started`** written at startup
+  before turn 1 (so a reader fences stale prior-run data in the never-cleared `.ralph/`, and a
+  pre-turn halt annotates THIS run); an explicit **terminal halt class** via the EXIT trap
+  (`complete | blocked | review-exhausted | stall | sigint`) so "ended" is never read as "idle";
+  a structured **`paused:{reason,until_epoch}`** around the usage-limit sleep and the review-gate
+  CI wait, cleared when the wait ends; and the **stall/review counters** promoted from `live.log`
+  narration into fields. A SIGKILL/OOM skips the trap, so "killed" is *reader-inferred* (run_id
+  live, container gone) — never runner-written. All reuse the `persist_blocked` merge pattern so a
+  partial write never clobbers other heartbeat fields. Additive; runner change → two-channel release.
 - **Work-class model dispatch (`RALPH_MODEL_<CLASS>`, opt-in).** A task may carry a trailing
   work-class tag in tasks.md (e.g. `(stateful)`); `select_model()` maps the class to a model via the
   `RALPH_MODEL_<CLASS>` table and passes it as `claude --model` for that turn, falling back to
@@ -262,6 +273,39 @@ both required in one release.
   one ambiguity stops promptly with a signal instead of silently burning `RALPH_MAX_STALLS`
   turns. This is the one behavior that fires even with `RALPH_NOTIFY_CMD` unset. Runner change
   → two-channel release (rebuild the base image).
+
+### Ephemeral progress dashboard (`progress-dashboard` capability, `RALPH_DASHBOARD`, opt-in default-off)
+
+A localhost web view of a running loop, built on the honest `loop-lifecycle-state` signals above.
+Load-bearing design choices (see `openspec/changes/ephemeral-dashboard/design.md`):
+
+- **Host-side, viewer extracted from the image (D3a).** Auto-launch-on-`make loop` constrains
+  placement: the consumer's thin `Makefile` can't resolve `$CLAUDE_PLUGIN_ROOT`, so the only single
+  source it reaches is the base image it already runs. The `Makefile` `loop` recipe is a **single-shell
+  wrapper** (`define RALPH_LOOP_RUN`) that `podman cp`s `ralph_dashboard.py` out of the loop image to a
+  host temp path, runs it with **host `python3`** against the host-native bind-mounted `.ralph/`, and
+  traps teardown (kill + rm). **The container stays foreground and PORT-FREE** — the kit's "log source,
+  not a service" stance is intact; only the viewer (host-side) binds `127.0.0.1:0`. So `SIGINT → exit
+  130` is preserved (only the viewer is backgrounded); `base/tests/test_dashboard_wrapper.sh` extracts
+  the shipped wrapper and proves it.
+- **Single-sourced, NEVER scaffolded (D2).** The viewer is generic machinery (byte-identical across
+  projects), so — unlike `gate.sh` — it is **not** written into the consumer or the scaffold manifest;
+  only the `Makefile` wrapper delta + the `RALPH_DASHBOARD` key are scaffolded. A viewer fix reaches
+  projects via `/plugin update` + base rebuild, not per-repo edits.
+- **Honest liveness (D4).** Live ⇔ `run_id` current AND the loop container running (`podman ps`, the
+  same source `/ralph-status` uses). Paused renders with its resume time; ended renders its halt class;
+  a vanished process (no terminal write, container gone) renders **killed (inferred)** — never running.
+- **Facts from structured state, not log scraping.** Turn/model/commit/progress come from
+  `current.json`/`status.jsonl`/`tasks.md`; `live.log` feeds only the activity drawer.
+- **Security is first-class (D11).** Agent-authored text is escaped server-side AND rendered via
+  `textContent`; the bootstrap JSON escapes `<` (no `</script>` breakout); a restrictive CSP
+  (`default-src 'none'`) + `Host`-header allowlist (DNS-rebind defense) are served on every response.
+- **No gate-stage pills (Non-Goal).** The gate runs in the project-owned `gate.sh` with no structured
+  per-stage signal; drawing stage progress would be a fabricated signal, so it is deliberately omitted.
+- The viewer's **pure logic** (state derivation, liveness, ribbon, escaping) is unit-tested against
+  `.ralph/` fixtures (`base/tests/test_dashboard.py`); the socket/SSE/thread plumbing is covered by a
+  smoke test (D12), analogous to image contents under `make smoke-base`. The viewer ships in the base
+  image, so a change here is a **two-channel release** (plugin bump + base rebuild) like the runner.
 
 ### Invariants to preserve when editing
 

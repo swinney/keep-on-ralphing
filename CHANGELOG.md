@@ -15,6 +15,39 @@ reaching a machine can take two steps:
 
 Dates are UTC.
 
+## [0.10.0] — 2026-06-26
+
+### Added
+- **Ephemeral progress dashboard (`progress-dashboard`, opt-in via `RALPH_DASHBOARD=1`, default off).**
+  `make loop` can now auto-launch a localhost web view that renders the loop live — a churn-weighted
+  Commit Ribbon, an X/N task arc, and a "stakes strip" (rate-limit countdown, stall-pressure meter,
+  review-round pips) that lights only while live — and tears itself down when the loop ends. It runs
+  **host-side**: the `Makefile` `loop` recipe (now a single-shell wrapper) extracts the stdlib-only
+  viewer from the loop image and runs it with host `python3` against the bind-mounted `.ralph/`, so the
+  **container stays port-free** and `SIGINT → exit 130` is preserved. The viewer is **single-sourced**
+  (image-baked, never scaffolded into the project), derives facts from the structured state files (not
+  log scraping), represents liveness honestly (run-id + container-running; a vanished process reads as
+  "killed (inferred)"), and escapes all agent-authored text behind a restrictive CSP + `Host`-header
+  defense. Missing host `python3` → the dashboard is skipped with a warning, never failing the loop.
+
+**Two-channel release — base-image rebuild required** (the viewer ships in the base image). Run
+`make build-base` / `/ralph-build-base` on every loop machine, then `/plugin update`.
+
+## [0.9.0] — 2026-06-26
+
+### Added
+- **Honest loop lifecycle signals (`loop-lifecycle-state`).** The runner now stamps `current.json` so
+  any reader can represent the loop faithfully: a per-invocation **run-id + start time** (written before
+  turn 1, fencing stale prior-run data in the never-cleared `.ralph/`); an explicit **terminal halt
+  class** on every loop-ending path (`complete | blocked | review-exhausted | stall | sigint`) so "ended"
+  is never read as "idle"; a structured **`paused:{reason,until_epoch}`** around the usage-limit sleep
+  and the review-gate CI wait, cleared when the wait ends; and the **stall/review counters** promoted
+  from `live.log` narration into fields. `/ralph-status` reads them. A SIGKILL/OOM skips the EXIT trap,
+  so "killed" stays a reader inference, not a runner write. All additive (reuse the `persist_blocked`
+  merge), so a partial write never clobbers other heartbeat fields.
+
+**Two-channel release — base-image rebuild required** (runner change). Inert if unread.
+
 ## [0.8.3] — 2026-06-23
 
 ### Changed

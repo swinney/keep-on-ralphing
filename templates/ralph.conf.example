@@ -150,3 +150,12 @@ RALPH_CONTAINER="ralph-loop"
 # RUN_FLAGS use the Podman-specific `--userns=keep-id`; Docker users must adjust
 # those flags (drop it / use `--user`). The status digest is runtime-agnostic.
 RALPH_RUNTIME="podman"
+
+# --- ephemeral progress dashboard (opt-in, host-side) -----------------------
+
+# 1 makes `make loop` auto-launch a localhost web dashboard that renders the loop's
+# progress live (the churn-weighted Commit Ribbon, task arc, stall/review stakes)
+# and tears itself down when the loop ends. It runs HOST-side (needs host python3;
+# skipped with a warning if absent) against .ralph/ — the container opens no port.
+# The URL is printed and written to .ralph/dashboard.url. Default: 0 (off).
+RALPH_DASHBOARD="0"

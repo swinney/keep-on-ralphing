@@ -280,12 +280,20 @@ select_model() {
 # git-derived feed ($state_dir/status.jsonl). No-op if python3 is unavailable.
 emit_status() {
   command -v python3 >/dev/null 2>&1 || return 0
-  RJ_MODE="$1" RJ_STATE_DIR="$state_dir" python3 - <<'PY' 2>/dev/null || true
+  RJ_MODE="$1" RJ_STATE_DIR="$state_dir" \
+    RJ_STALLS="${stalls:-0}" RJ_MAX_STALLS="${max_stalls:-0}" \
+    RJ_REVIEW_ROUND="${review_rounds:-0}" RJ_REVIEW_MAX="${RALPH_REVIEW_MAX_ROUNDS:-3}" \
+    python3 - <<'PY' 2>/dev/null || true
 import json, os
 def opt(k):
     v = os.environ.get(k, "")
     return v if v else None
 rec = {
+    # Per-invocation identity (exported once at startup): lets a reader fence stale
+    # prior-run data — .ralph/ is never cleared between runs, so a record whose
+    # run_id != the live one is from a previous loop.
+    "run_id": opt("RJ_RUN_ID"),
+    "run_started": opt("RJ_RUN_STARTED"),
     "turn": int(os.environ.get("RJ_TURN", "0")),
     "task": os.environ.get("RJ_TASK", ""),
     "model": opt("RJ_MODEL") or "default",
@@ -301,6 +309,12 @@ rec = {
     # its decision here instead of letting the reader re-derive it from the file.
     "blocked": os.environ.get("RJ_BLOCKED") == "1",
     "blocked_reason": opt("RJ_BLOCKED_REASON"),
+    # Progress-toward-halt counters, promoted from live.log narration to structured
+    # fields so a reader parses them instead of scraping free text.
+    "stalls": int(os.environ.get("RJ_STALLS", "0")),
+    "max_stalls": int(os.environ.get("RJ_MAX_STALLS", "0")),
+    "review_round": int(os.environ.get("RJ_REVIEW_ROUND", "0")),
+    "review_max": int(os.environ.get("RJ_REVIEW_MAX", "0")),
 }
 if os.environ["RJ_MODE"] == "current":
     json.dump(rec, open(os.environ["RJ_STATE_DIR"] + "/current.json", "w"), indent=2)
@@ -328,6 +342,89 @@ except Exception:
 d["state"] = "blocked"
 d["blocked"] = True
 d["blocked_reason"] = os.environ.get("RJ_BLOCKED_REASON") or None
+json.dump(d, open(p, "w"), indent=2)
+PY
+}
+
+# Record the terminal halt class onto the heartbeat as the loop exits, so a reader
+# can tell WHY a loop ended — and THAT it ended: "idle" is the between-turns state
+# and must never be mistaken for "done". Merged (not a fresh emit) to preserve the
+# last turn's fields, and only when $halt_class was set — refuse-to-start and --once
+# exits leave it empty and write nothing. A SIGKILL/OOM skips the EXIT trap entirely,
+# so "killed" is deliberately left for a reader to infer (run_id live, container gone).
+persist_halt() {
+  [ -n "${halt_class:-}" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  RJ_STATE_DIR="$state_dir" RJ_HALT="$halt_class" python3 - <<'PY' 2>/dev/null || true
+import json, os, sys
+p = os.environ["RJ_STATE_DIR"] + "/current.json"
+try:
+    d = json.load(open(p))
+except Exception:
+    sys.exit(0)  # no heartbeat to annotate (e.g. a refuse-to-start before turn 1)
+d["state"] = os.environ["RJ_HALT"]
+d["paused"] = None  # a halted loop is no longer paused
+json.dump(d, open(p, "w"), indent=2)
+PY
+}
+
+# Record that the loop is paused (usage-limit wait or review-gate CI wait) with the
+# expected resume time, so a reader shows "paused, resumes <time>" rather than
+# misreading a multi-hour wait as a hang. until_epoch is absolute seconds-since-epoch
+# (portable via `date +%s` — no `date -d` arithmetic). The record is cleared when the
+# next turn's emit_status overwrites current.json (work resumed) or by persist_halt.
+persist_paused() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  RJ_STATE_DIR="$state_dir" RJ_PAUSE_REASON="$1" RJ_PAUSE_UNTIL="$2" python3 - <<'PY' 2>/dev/null || true
+import json, os
+p = os.environ["RJ_STATE_DIR"] + "/current.json"
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {}
+u = os.environ.get("RJ_PAUSE_UNTIL")
+d["paused"] = {"reason": os.environ["RJ_PAUSE_REASON"],
+               "until_epoch": int(u) if u else None}
+json.dump(d, open(p, "w"), indent=2)
+PY
+}
+
+# Clear the paused record the moment a wait ends, so a reader never sees "paused"
+# while the loop is actually working again. The per-turn emit_status overwrite also
+# clears it on a turn boundary, but a review-gate CI wait ends mid-turn (before the
+# next emit), so an explicit clear is needed there. Merge to preserve the heartbeat.
+clear_paused() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  RJ_STATE_DIR="$state_dir" python3 - <<'PY' 2>/dev/null || true
+import json, os, sys
+p = os.environ["RJ_STATE_DIR"] + "/current.json"
+try:
+    d = json.load(open(p))
+except Exception:
+    sys.exit(0)
+d["paused"] = None
+json.dump(d, open(p, "w"), indent=2)
+PY
+}
+
+# Refresh the promoted counters onto current.json the moment they change (a stall
+# increment, a reset, a new review round), so a reader sees the latest value without
+# waiting for the next turn's heartbeat — and so the value survives onto the halt
+# record when a stall trips the limit. Reads the same loop globals as emit_status.
+persist_counters() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  RJ_STATE_DIR="$state_dir" RJ_STALLS="${stalls:-0}" RJ_MAX_STALLS="${max_stalls:-0}" \
+    RJ_REVIEW_ROUND="${review_rounds:-0}" RJ_REVIEW_MAX="${RALPH_REVIEW_MAX_ROUNDS:-3}" python3 - <<'PY' 2>/dev/null || true
+import json, os
+p = os.environ["RJ_STATE_DIR"] + "/current.json"
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {}
+d["stalls"] = int(os.environ.get("RJ_STALLS", "0"))
+d["max_stalls"] = int(os.environ.get("RJ_MAX_STALLS", "0"))
+d["review_round"] = int(os.environ.get("RJ_REVIEW_ROUND", "0"))
+d["review_max"] = int(os.environ.get("RJ_REVIEW_MAX", "0"))
 json.dump(d, open(p, "w"), indent=2)
 PY
 }
@@ -418,17 +515,25 @@ run_review_gate() {
   # cannot hang the loop forever. Reuses the limit_poll cadence.
   waited=0
   status=$(ci_status "$num")
+  if [ "$status" = pending ]; then
+    # Waiting on CI is a pause, not a hang. Record it so a reader shows "paused (CI)"
+    # rather than an apparent stall; until_epoch is a coarse upper bound (the full
+    # poll budget). Cleared when the gate proceeds (next turn's emit) or on halt.
+    persist_paused review-ci "$(($(date +%s) + ${RALPH_REVIEW_CI_MAX:-60} * limit_poll))"
+  fi
   while [ "$status" = pending ] && [ "$waited" -lt "${RALPH_REVIEW_CI_MAX:-60}" ]; do
     sleep "$limit_poll"
     waited=$((waited + 1))
     status=$(ci_status "$num")
   done
+  clear_paused # the CI wait is over (settled or budget spent) — no longer paused
 
   findings=$(request_review "$num")
 
   if [ -z "${findings//[[:space:]]/}" ] && [ "$status" = success ]; then
     : >"$review_findings"
     review_rounds=0
+    persist_counters # refresh the reset round immediately (parity with the fail path)
     narrate "ralph: review-gate PASS on PR #$num (clean review, CI green)"
     if [ "${RALPH_AUTO_MERGE:-0}" = 1 ]; then
       if merge_pr "$num"; then
@@ -453,6 +558,7 @@ run_review_gate() {
     fi
   } >"$review_findings"
   review_rounds=$((review_rounds + 1))
+  persist_counters
   narrate "ralph: review-gate found issues on PR #$num (round ${review_rounds}/${RALPH_REVIEW_MAX_ROUNDS:-3}) — wrote $review_findings"
 
   if [ "$review_rounds" -ge "${RALPH_REVIEW_MAX_ROUNDS:-3}" ]; then
@@ -584,10 +690,34 @@ release_lock() {
   lock_held=0
   return 0
 }
+halt_class=""
 acquire_lock
-trap release_lock EXIT
+# On exit, record the terminal halt class (if any) onto the heartbeat, THEN release
+# the lock. Fires for clean stops and for the SIGINT handler's `exit` alike.
+on_exit() {
+  persist_halt
+  release_lock
+}
+trap on_exit EXIT
 
-trap 'echo; _sig="ralph: caught SIGINT at turn $turn, exiting"; echo "$_sig"; _live_append "$_sig"; exit 130' INT
+trap 'echo; _sig="ralph: caught SIGINT at turn $turn, exiting"; echo "$_sig"; halt_class="sigint"; _live_append "$_sig"; exit 130' INT
+
+# Per-invocation run identity. .ralph/ is never cleared between runs, so a reader
+# needs a way to tell THIS run's state from a previous run's leftovers. Stamp it
+# once and export it so every emit_status / merge write carries it (the python
+# subprocesses inherit the exported RJ_RUN_* vars). $$ + UTC second is unique per
+# loop start; date +fmt is portable (GNU + BSD), unlike date -d arithmetic.
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
+run_started="$(date -Is)"
+export RJ_RUN_ID="$run_id" RJ_RUN_STARTED="$run_started"
+
+# Stamp the live identity into current.json NOW — before any pre-turn work (base-
+# version read, the review-gate preflight) or a pre-turn SIGINT — so a reader can
+# fence stale prior-run state from the first moment, and a pre-turn halt annotates
+# THIS run, not the previous one. A fresh emit (full overwrite, not a merge) also
+# clears the prior run's blocked/paused/counters. state="starting": begun, no turn
+# yet. (Codex review, PR #26.) The lock is already held, so this run owns the slot.
+RJ_TURN="$turn" RJ_TASK="$(first_task)" RJ_STATE="starting" RJ_STARTED="$run_started" emit_status current
 
 base_version=$(cat "$base_version_file" 2>/dev/null | tr -d '[:space:]')
 narrate "ralph: base-version ${base_version:-unknown}"
@@ -657,7 +787,9 @@ while true; do
     reset=$(grep -oiE "resets [^.]*" "$last_log" | head -1)
     wait_s=$(python3 "$script_dir/until_reset.py" "$reset" 2>/dev/null || echo "$limit_poll")
     narrate "ralph: usage limit hit at turn $turn (${reset:-reset time unknown}) — pausing ${wait_s}s, then retrying (not a stall)"
+    persist_paused usage-limit "$(($(date +%s) + wait_s))"
     sleep "$wait_s"
+    clear_paused
     turn=$((turn - 1)) # replay this turn number — the task was not completed
     echo "$turn" >"$turn_file"
     continue
@@ -675,6 +807,7 @@ while true; do
     cat STATUS.md
     _live_append "ralph: stop reason: $(printf '%s' "$status_now" | oneline)"
     notify_human stop "$(printf '%s' "$status_now" | oneline)"
+    halt_class="complete"
     exit 0
   fi
 
@@ -699,6 +832,7 @@ while true; do
       cat "$questions_file"
       _live_append "ralph: blocked question: $q_reason"
       notify_human blocked "$q_reason"
+      halt_class="blocked"
       exit 1
     fi
   fi
@@ -714,22 +848,26 @@ while true; do
       cat STATUS.md
       _live_append "ralph: review-exhausted reason: $(cat STATUS.md 2>/dev/null | oneline)"
       notify_human review-exhausted "$(cat STATUS.md 2>/dev/null | oneline)"
+      halt_class="review-exhausted"
       exit 1
     fi
   fi
 
   if [ "$before" = "$after" ]; then
     stalls=$((stalls + 1))
+    persist_counters
     narrate "ralph: turn $turn produced NO commit (stall ${stalls}/${max_stalls}, exit ${turn_ec})"
     if [ "$stalls" -ge "$max_stalls" ]; then
       printf 'Loop halted: %d consecutive turns made no commit (last exit %d — hung/timed-out or stuck-on-red). Human review needed.\n' \
         "$stalls" "$turn_ec" >STATUS.md
       narrate "ralph: ${stalls} consecutive no-progress turns — wrote STATUS.md, stopping"
       notify_human stall "$(cat STATUS.md 2>/dev/null | oneline)"
+      halt_class="stall"
       exit 1
     fi
   else
     stalls=0
+    persist_counters
   fi
 
   sleep "$poll_interval"

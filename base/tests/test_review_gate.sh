@@ -352,6 +352,45 @@ grep -q "auto-merged PR" "$WS/.ralph/log/live.log" 2>/dev/null \
   || ok "a failed merge does not falsely report success"
 cleanup
 
+# --- 16. a pending-CI wait records paused{reason=review-ci} in current.json --
+# Observed mid-wait from a backgrounded gate run; cleared once the gate proceeds.
+new_gate_ws
+echo 8 >"$STUB/ci_exit" # CI pending → the gate waits on it
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+( RALPH_ARGS="" run_gate RALPH_LIMIT_POLL=1 RALPH_REVIEW_CI_MAX=3 RALPH_REVIEW_MAX_ROUNDS=1 RALPH_MAX_STALLS=9 >/dev/null 2>&1 ) &
+gate_pid=$!
+preason=""
+for _ in $(seq 1 30); do
+  preason=$(python3 -c "import json;d=json.load(open('$WS/.ralph/current.json'));p=d.get('paused') or {};print(p.get('reason') or '')" 2>/dev/null)
+  [ -n "$preason" ] && break
+  kill -0 "$gate_pid" 2>/dev/null || break # gate ended before we observed the CI wait
+  sleep 0.2
+done
+wait "$gate_pid" 2>/dev/null
+[ "$preason" = "review-ci" ] \
+  && ok "pending-CI wait records paused.reason=review-ci" \
+  || bad "CI-wait paused record wrong (reason='$preason')"
+cleanup
+
+# --- 17. startup stamps the live run identity into current.json before any turn -
+# A reader inspecting a reused .ralph/ before turn 1 (e.g. during the gate preflight,
+# or on a pre-turn SIGINT) must see THIS run, not the prior run's leftovers. Proven
+# via a no-remote refuse, which exits AFTER the startup stamp but BEFORE any turn.
+new_gate_ws
+git -C "$WS" remote remove origin
+mkdir -p "$WS/.ralph"
+cat >"$WS/.ralph/current.json" <<'J'
+{"run_id":"OLD-RUN","state":"complete","turn":7,"blocked":true,"blocked_reason":"stale"}
+J
+RALPH_ARGS="" run_gate >/dev/null 2>&1
+read -r rid st blk < <(python3 -c "import json;d=json.load(open('$WS/.ralph/current.json'));print(d.get('run_id'), d.get('state'), d.get('blocked'))" 2>/dev/null)
+{ [ -n "$rid" ] && [ "$rid" != "OLD-RUN" ] && [ "$st" = "starting" ] && [ "$blk" = "False" ]; } \
+  && ok "startup stamps a fresh run identity (run_id=$rid state=$st) and clears stale signals" \
+  || bad "startup stamp wrong (run_id='$rid' state='$st' blocked='$blk')"
+cleanup
+
 echo
 echo "review-gate tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

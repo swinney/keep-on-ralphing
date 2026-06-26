@@ -36,7 +36,24 @@ the repo root, then read:
    the loop's own container-namespace value and `flock`, not the file, is the
    authority — a host-side liveness check is meaningless. Read-only.
 2. **Current turn** — `<state_dir>/current.json` (the heartbeat: turn, task,
-   model, state, started). If absent, "no heartbeat yet".
+   model, state, started). If absent, "no heartbeat yet". The heartbeat now carries
+   honest lifecycle signals — read and report them:
+   - **`run_id`** identifies THIS invocation. When the container-running check (step 1)
+     says no loop is up, a `current.json` whose `run_id` belongs to a finished run is
+     stale prior-run state — report the loop as ended, not live. (Pair it with the
+     terminal `state` below; a live `run_id` with no running container ⇒ the loop was
+     **killed** — inferred, since a SIGKILL/OOM leaves no terminal write.)
+   - **`state`** is `starting` (run begun, turn 1 not yet underway — stamped before any
+     pre-turn work), `running`/`idle` mid-loop, or a terminal **halt class** once the
+     loop ended: `complete` (project done / clean stop), `blocked`, `review-exhausted`,
+     `stall`, or `sigint`. Report the halt class verbatim — never read a terminal state
+     as "idle/still working".
+   - **`paused`** (object, or absent/null): when set, the loop is waiting, not hung —
+     report `paused.reason` (e.g. `usage-limit`) and the resume time from
+     `paused.until_epoch` (epoch seconds; render as a local time / countdown).
+   - **`stalls`/`max_stalls`** and **`review_round`/`review_max`**: progress-toward-halt
+     counters — surface them as `stalls N/max` and (gate on) `review round N/max` so the
+     operator sees how close the loop is to giving up.
 3. **Recent turns** — the last ~10 lines of `<state_dir>/status.jsonl`; each line
    is a JSON record with turn, model, exit_code, committed, sha, task. Summarize
    one per line, marking committed turns. **Show the `model` per turn** — it is the
@@ -70,7 +87,8 @@ the repo root, then read:
 ## How to report
 
 Print a compact digest, in this order: running state → base-image freshness →
-workspace lock → current turn → recent turns (newest last, with per-turn model) →
+workspace lock → current turn (incl. terminal halt class / paused-with-resume /
+stall + review counters) → recent turns (newest last, with per-turn model) →
 STATUS.md stop state → review-gate state (if on) → notifications + blocked state →
 recent commits → live-log hint (if present). Keep it scannable
 (a few lines each). Don't editorialize; report the facts. If the state dir
@@ -78,6 +96,10 @@ doesn't exist yet, say the loop has not run in this repo.
 
 ## Guardrails
 - Read-only. Never start, stop, or modify the loop or its state.
+- A terminal `state` (`complete`/`blocked`/`review-exhausted`/`stall`/`sigint`) means
+  the loop ENDED — never report it as running/idle. `idle` is only between turns.
+- A live `run_id` with no running container ⇒ killed (inferred); a finished-run
+  `run_id` left in `current.json` is stale — don't present it as the live loop.
 - A blank or whitespace-only `STATUS.md` is NOT a stop signal — never report it
   as one.
 - Read blocked-question state ONLY from `current.json`'s `blocked` field, never by

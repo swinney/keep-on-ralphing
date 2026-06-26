@@ -17,8 +17,8 @@ honest, then adds an opt-in dashboard that renders it.
   - a **per-invocation run-id + start time** in `current.json`, so a reader can fence stale
     prior-run data (ignore any record whose run-id ≠ the live one);
   - an **explicit terminal write in the EXIT trap** recording the halt **class**
-    (`complete | blocked | review-exhausted | stall | sigint | killed-inferred`), so "done" is never
-    confused with "idle between turns";
+    (`complete | blocked | review-exhausted | stall | sigint`), so "done" is never confused with
+    "idle between turns" (a SIGKILL/OOM leaves no write — the dashboard *infers* "killed", per design D4);
   - a structured **`paused: {reason, until}`** record around *both* the usage-limit sleep and the
     review-gate CI wait, so a long pause renders as "paused, resumes 14:32" not "hung";
   - the **stall count** and **review-round** counters promoted from `live.log` narration into

@@ -75,6 +75,11 @@ first** (so a substituted `{{PLACEHOLDER}}` does not show as a diff), then:
     token; without this a review-gated loop refuses to start. State this risk explicitly.
   - the **`check-base`** target and its `loop`/`loop-once` prerequisite (refuses a loop image built on a
     superseded base).
+  - the **dashboard launch wrapper** (`define RALPH_LOOP_RUN` + `export RALPH_LOOP_RUN`, and the `loop`
+    recipe rewritten to invoke it via `bash -c "$$RALPH_LOOP_RUN" …`). This both adds the `define` block
+    AND replaces the `loop` recipe's single `podman run` line, so it is not a pure insertion — show the
+    `loop`-recipe diff and confirm. Harmless if `RALPH_DASHBOARD` is unset (the wrapper just runs the loop
+    exactly as before); the `RALPH_DASHBOARD` key itself is added by the `ralph.conf` rule below.
 - **`ralph.conf` (low-risk).** Append both (a) documented **active keys** the file lacks and (b) **commented
   documentation sections** the current template adds that the project lacks — e.g. the work-class dispatch
   block (`# RALPH_MODEL_STATEFUL=...`), which carries NO active key and so is invisible to a keys-only diff.

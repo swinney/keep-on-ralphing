@@ -40,17 +40,17 @@ the viewer on top of it. Each implementation task is test-first per the project'
 
 ## 5. Phase 2 — Launch & teardown wiring
 
-- [ ] 5.1 Add the `RALPH_DASHBOARD` opt-in key (default off; `env > ralph.conf > default`) with startup validation and graceful-skip when host `python3` is absent
-- [ ] 5.2 Refactor the `Makefile` `loop` recipe into a single-shell wrapper that launches the viewer (per D3), prints/persists the URL, and traps teardown on loop exit
-- [ ] 5.3 Verify the wrapper preserves the loop's `SIGINT → exit 130` stop path (container stays foreground; only the viewer is backgrounded) — explicit regression test
-- [ ] 5.4 Scaffold ONLY the Makefile-wrapper delta + `ralph.conf` key (templates + example parity); add just that delta to `.ralph-scaffold.json` and `/ralph-upgrade`; confirm the viewer source is not scaffolded
+- [x] 5.1 Add the `RALPH_DASHBOARD` opt-in key (default off; `env > ralph.conf > default`) with startup validation and graceful-skip when host `python3` is absent
+- [x] 5.2 Refactor the `Makefile` `loop` recipe into a single-shell wrapper that launches the viewer (per D3), prints/persists the URL, and traps teardown on loop exit
+- [x] 5.3 Verify the wrapper preserves the loop's `SIGINT → exit 130` stop path (container stays foreground; only the viewer is backgrounded) — explicit regression test
+- [x] 5.4 Scaffold ONLY the Makefile-wrapper delta + `ralph.conf` key (templates + example parity); add just that delta to `.ralph-scaffold.json` and `/ralph-upgrade`; confirm the viewer source is not scaffolded
 
 ## 6. Phase 2 — Verification
 
-- [ ] 6.1 Viewer pure-logic unit tests pass (state derivation, liveness, ribbon, escaping); server plumbing covered structurally/smoke
-- [ ] 6.2 Security checks pass: escaping renders hostile text inert; non-loopback `Host` rejected; CSP present
-- [ ] 6.3 Liveness honesty: a paused loop shows "paused, resumes …"; a finished loop shows its halt class; a reused `.ralph/` is not shown as live
-- [ ] 6.4 Full `make test` green; spec-conformance checks pass (no new manifest drift)
+- [x] 6.1 Viewer pure-logic unit tests pass (state derivation, liveness, ribbon, escaping); server plumbing covered structurally/smoke
+- [x] 6.2 Security checks pass: escaping renders hostile text inert; non-loopback `Host` rejected; CSP present
+- [x] 6.3 Liveness honesty: a paused loop shows "paused, resumes …"; a finished loop shows its halt class; a reused `.ralph/` is not shown as live
+- [x] 6.4 Full `make test` green; spec-conformance checks pass (no new manifest drift)
 
 ## 7. Phase 2 — Docs & two-channel release
 

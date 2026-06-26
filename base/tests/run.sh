@@ -51,6 +51,10 @@ echo "== base-image freshness tests =="
 bash "$here/test_base_freshness.sh" || rc=1
 
 echo
+echo "== dashboard launch-wrapper tests =="
+bash "$here/test_dashboard_wrapper.sh" || rc=1
+
+echo
 echo "== structural conformance tests =="
 bash "$here/test_conformance.sh" || rc=1
 

@@ -263,7 +263,11 @@ def render_page(snapshot):
     activity = "\n".join(escape_field(ln) for ln in (snapshot.get("activity") or []))
     body = (
         head + meta
-        + "<section id=ribbon aria-label='commit ribbon'></section>"
+        + "<section id=taskbar aria-label='task progress'><div id=taskfill></div>"
+        + "<span id=tasklabel></span></section>"
+        + "<div class=ribbonwrap><div class=caption>commit ribbon"
+        + " <em>· bar height = diff churn · hollow = stall</em></div>"
+        + "<section id=ribbon aria-label='commit ribbon'></section></div>"
         + "<section id=stakes></section>"
         + "<details id=logbox><summary>activity log</summary>"
         + "<pre id=activity>" + activity + "</pre></details>"
@@ -434,74 +438,109 @@ def main(argv=None):
 
 
 APP_CSS = """
-:root{--bg:#0b0e14;--fg:#c8d3e0;--dim:#5b6b80;--ok:#3fb950;--hollow:#26303d;
---warn:#d29922;--bad:#f85149;--accent:#58a6ff}
+:root{--bg:#070a10;--panel:#0e1320;--fg:#dbe4f0;--dim:#6b7c93;--line:#1a2333;
+--ok:#42d977;--ok2:#2ea043;--hollow:#1c2636;--warn:#f0b429;--bad:#ff5d5d;--accent:#6ea8ff}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-header{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid #1b2230}
-header h1{margin:0;font-size:16px;letter-spacing:.18em;color:var(--accent)}
-.phase{padding:2px 10px;border-radius:999px;background:#1b2230;text-transform:uppercase;font-size:11px;letter-spacing:.1em}
-.phase[data-phase=running],.phase[data-phase=starting]{background:#11331d;color:var(--ok)}
-.phase[data-phase=paused]{background:#3a2d0a;color:var(--warn)}
-.phase[data-phase=ended]{background:#1b2230;color:var(--dim)}
-.phase[data-phase=killed],.phase[data-phase=blocked]{background:#3a1414;color:var(--bad)}
-.run{margin-left:auto;color:var(--dim);font-size:12px}
-#meta{padding:12px 18px;color:var(--dim)}#meta b{color:var(--fg)}
-#ribbon{display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap;padding:18px;min-height:80px}
-.node{width:14px;border-radius:3px;background:var(--hollow);position:relative}
-.node.commit{background:var(--ok)}
-.node:hover::after{content:attr(data-tip);position:absolute;bottom:100%;left:0;white-space:nowrap;
-background:#1b2230;color:var(--fg);padding:4px 8px;border-radius:4px;font-size:11px;z-index:2}
-#stakes{display:flex;gap:22px;padding:6px 18px 16px;flex-wrap:wrap;color:var(--dim)}
-#stakes .gone{display:none}
-.meter{height:6px;width:120px;background:var(--hollow);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle}
-.meter>span{display:block;height:100%;background:var(--warn)}
-.pip{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--hollow);margin-left:3px}
-.pip.on{background:var(--accent)}
-#logbox{margin:0 18px 24px;border:1px solid #1b2230;border-radius:6px}
-#logbox summary{cursor:pointer;padding:8px 12px;color:var(--dim)}
-#activity{margin:0;padding:12px;max-height:320px;overflow:auto;white-space:pre-wrap;font-size:12px;color:#9fb0c3}
+html,body{height:100%}
+body{margin:0;color:var(--fg);font:15px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+background:radial-gradient(1200px 600px at 15% -10%,#11203a 0%,transparent 55%),
+radial-gradient(900px 500px at 100% 0%,#1a1330 0%,transparent 50%),var(--bg);
+background-attachment:fixed}
+header{display:flex;align-items:center;gap:16px;padding:20px 26px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.22em;
+background:linear-gradient(90deg,#7cc0ff,#9b8cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.phase{padding:5px 16px;border-radius:999px;background:var(--panel);text-transform:uppercase;
+font-size:12px;font-weight:700;letter-spacing:.14em;border:1px solid var(--line)}
+.phase[data-phase=running],.phase[data-phase=starting]{background:#0c2a18;color:var(--ok);
+border-color:#1c5733;box-shadow:0 0 0 0 rgba(66,217,119,.5);animation:pulse 2s infinite}
+.phase[data-phase=paused]{background:#33280a;color:var(--warn);border-color:#5c4710}
+.phase[data-phase=ended]{background:var(--panel);color:var(--dim)}
+.phase[data-phase=killed],.phase[data-phase=blocked]{background:#360f0f;color:var(--bad);border-color:#5e1c1c}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(66,217,119,.45)}70%{box-shadow:0 0 0 10px rgba(66,217,119,0)}100%{box-shadow:0 0 0 0 rgba(66,217,119,0)}}
+.run{margin-left:auto;color:var(--dim);font-size:13px;letter-spacing:.05em}
+#meta{padding:16px 26px 6px;color:var(--dim);font-size:14px}#meta b{color:var(--fg)}#meta #subject{color:var(--accent)}
+#taskbar{position:relative;height:26px;margin:8px 26px 4px;background:var(--panel);
+border:1px solid var(--line);border-radius:8px;overflow:hidden}
+#taskfill{height:100%;width:0;background:linear-gradient(90deg,var(--ok2),var(--ok));
+transition:width .6s cubic-bezier(.2,.8,.2,1)}
+#tasklabel{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+font-size:12px;font-weight:700;letter-spacing:.08em;color:#eaf2ff;text-shadow:0 1px 2px #000}
+.ribbonwrap{padding:18px 26px 4px}
+.caption{color:var(--dim);font-size:12px;margin-bottom:10px;letter-spacing:.04em}.caption em{color:#46566e;font-style:normal}
+#ribbon{display:flex;align-items:flex-end;gap:7px;flex-wrap:wrap;min-height:120px}
+.node{width:18px;border-radius:5px 5px 2px 2px;background:var(--hollow);position:relative;
+border:1px solid #232f43;transition:height .5s cubic-bezier(.2,.8,.2,1)}
+.node.commit{background:linear-gradient(180deg,var(--ok),var(--ok2));border-color:#1c5733;
+box-shadow:0 0 10px rgba(66,217,119,.35)}
+.node.enter{animation:grow .55s cubic-bezier(.2,.9,.2,1)}
+@keyframes grow{from{transform:scaleY(.05);opacity:.2}to{transform:scaleY(1);opacity:1}}
+.node{transform-origin:bottom}
+.node:hover::after{content:attr(data-tip);position:absolute;bottom:108%;left:50%;transform:translateX(-50%);
+white-space:nowrap;background:#0a1422;color:var(--fg);padding:6px 10px;border-radius:6px;font-size:12px;
+border:1px solid var(--line);z-index:3;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+#stakes{display:flex;gap:28px;align-items:center;padding:14px 26px 20px;flex-wrap:wrap;color:var(--dim);font-size:13px}
+.countdown{padding:6px 14px;border-radius:999px;background:#33280a;color:var(--warn);
+border:1px solid #5c4710;font-weight:700;animation:pulse-w 2s infinite}
+@keyframes pulse-w{0%{box-shadow:0 0 0 0 rgba(240,180,41,.4)}70%{box-shadow:0 0 0 9px rgba(240,180,41,0)}100%{box-shadow:0 0 0 0 rgba(240,180,41,0)}}
+.meter{height:9px;width:150px;background:var(--hollow);border-radius:6px;overflow:hidden;display:inline-block;vertical-align:middle;margin-left:8px;border:1px solid #232f43}
+.meter>span{display:block;height:100%;background:linear-gradient(90deg,var(--warn),var(--bad));transition:width .5s}
+.pip{display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--hollow);margin-left:5px;border:1px solid #232f43;vertical-align:middle}
+.pip.on{background:var(--accent);box-shadow:0 0 8px rgba(110,168,255,.6);border-color:var(--accent)}
+#logbox{margin:4px 26px 30px;border:1px solid var(--line);border-radius:10px;background:rgba(14,19,32,.6)}
+#logbox summary{cursor:pointer;padding:10px 14px;color:var(--dim);user-select:none}
+#logbox[open] summary{border-bottom:1px solid var(--line)}
+#activity{margin:0;padding:14px;max-height:340px;overflow:auto;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:#9fb0c3}
 """
 
 APP_JS = r"""
 'use strict';
 function $(id){return document.getElementById(id);}
 function txt(el,v){if(el)el.textContent=(v==null?'':String(v));}
+var prevTurns=-1; // track ribbon length to animate only genuinely-new nodes
 function render(s){
   if(!s)return;
   var ph=document.querySelector('.phase');
   if(ph){ph.dataset.phase=s.phase||'';txt(ph,s.phase||'');}
   txt($('turn'),s.turn);txt($('model'),s.model);txt($('subject'),s.subject||'—');
   var tp=s.task_progress||{done:0,total:0};txt($('tasks'),tp.done+'/'+tp.total);
-  // Commit Ribbon: filled node on a commit, hollow on a stall, height scaled by churn.
+  // Task progress bar.
+  var pct=tp.total?Math.round(100*tp.done/tp.total):0;
+  $('taskfill').style.width=pct+'%';
+  txt($('tasklabel'),tp.done+' / '+tp.total+' tasks  ·  '+pct+'%');
+  // Commit Ribbon: filled gradient node on a commit, hollow on a stall, height scaled
+  // by diff churn (sqrt so a huge commit doesn't flatten the rest). New nodes grow in.
   var rb=$('ribbon');rb.textContent='';
   var nodes=s.ribbon||[],max=1;
   nodes.forEach(function(n){if(n.churn>max)max=n.churn;});
-  nodes.forEach(function(n){
+  var fresh=(prevTurns>=0&&nodes.length>prevTurns)?nodes.length-prevTurns:0;
+  nodes.forEach(function(n,i){
     var d=document.createElement('div');
-    d.className='node'+(n.committed?' commit':'');
-    var h=n.committed?(18+Math.round(46*Math.min(1,n.churn/max))):14;
-    d.style.height=h+'px';
+    var isNew=(i>=nodes.length-fresh);
+    d.className='node'+(n.committed?' commit':'')+(isNew?' enter':'');
+    var scale=n.committed?Math.sqrt(Math.min(1,n.churn/max)):0;
+    d.style.height=(n.committed?(24+Math.round(86*scale)):16)+'px';
     d.setAttribute('data-tip','turn '+n.turn+(n.committed?(' · '+(n.sha||'')+' · +'+n.churn+' lines · '+(n.subject||'')):' · stall'));
     rb.appendChild(d);
   });
+  prevTurns=nodes.length;
   // Stakes strip — lit only when the loop is live.
   var stk=$('stakes');stk.textContent='';
   if(s.live){
     if(s.paused&&s.paused.until_epoch){
       var secs=Math.max(0,s.paused.until_epoch-Math.floor(Date.now()/1000));
       var m=Math.floor(secs/60),ss=secs%60;
-      stk.appendChild(chip('paused ('+s.paused.reason+') resumes in '+m+'m'+(ss<10?'0':'')+ss+'s'));
+      var pill=chip('⏸ '+s.paused.reason+' · resumes '+m+'m'+(ss<10?'0':'')+ss+'s');
+      pill.className='countdown';stk.appendChild(pill);
     }
-    stk.appendChild(meter('stalls',s.stalls,s.max_stalls));
-    if(s.review_max){stk.appendChild(pips('review',s.review_round,s.review_max));}
+    stk.appendChild(meter('stall pressure',s.stalls,s.max_stalls));
+    if(s.review_max){stk.appendChild(pips('review round',s.review_round,s.review_max));}
   }
   // Activity feed via textContent — agent text is inert regardless of content (D11).
-  if(Array.isArray(s.activity)){$('activity').textContent=s.activity.join('\n');}
+  if(Array.isArray(s.activity)){var a=$('activity');a.textContent=s.activity.join('\n');a.scrollTop=a.scrollHeight;}
 }
 function chip(t){var e=document.createElement('span');e.textContent=t;return e;}
 function meter(label,v,max){
-  var wrap=document.createElement('span');wrap.appendChild(document.createTextNode(label+' '+v+'/'+max+' '));
+  var wrap=document.createElement('span');wrap.appendChild(document.createTextNode(label+' '+v+'/'+max));
   var m=document.createElement('span');m.className='meter';var f=document.createElement('span');
   f.style.width=(max?Math.min(100,100*v/max):0)+'%';m.appendChild(f);wrap.appendChild(m);return wrap;
 }
@@ -518,9 +557,8 @@ function connect(){
 }
 connect();
 setInterval(function(){ // keep the rate-limit countdown ticking between snapshots
-  var el=document.querySelector('#stakes span');if(el&&/resumes in/.test(el.textContent)){
-    fetch('/state').then(function(r){return r.json();}).then(render).catch(function(){});
-  }
+  var el=document.querySelector('#stakes .countdown');
+  if(el){fetch('/state').then(function(r){return r.json();}).then(render).catch(function(){});}
 },1000);
 """
 

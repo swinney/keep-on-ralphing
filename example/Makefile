@@ -67,9 +67,48 @@ login:
 	@mkdir -p $(CLAUDE_DIR)
 	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE)-login $(IMAGE) claude login
 
+# Single-shell wrapper for `make loop` so one teardown trap can span the whole run
+# (Make runs each recipe LINE in its own shell). With RALPH_DASHBOARD=1 it extracts
+# the host-side dashboard viewer FROM the loop image (the base image bakes it), runs
+# it with HOST python3 against the host-native .ralph/, and traps teardown to kill it
+# + remove the temp file. The loop container stays FOREGROUND and port-free, so its
+# SIGINT -> exit 130 stop path is unchanged (only the viewer is backgrounded).
+# Precedence for the flag: env > ralph.conf > default(0). Dashboard is OFF by default.
+define RALPH_LOOP_RUN
+set -e
+rt="$$1"; img="$$2"; ws="$$3"; dash_env="$$4"; shift 4
+sd="$$ws/.ralph"
+dash="$$dash_env"
+if [ -z "$$dash" ] && [ -f "$$ws/ralph.conf" ]; then
+  dash=$$(. "$$ws/ralph.conf" 2>/dev/null; printf '%s' "$${RALPH_DASHBOARD:-}")
+fi
+[ -z "$$dash" ] && dash=0
+dpid=""; dtmp=""
+if [ "$$dash" = 1 ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    dtmp=$$(mktemp)
+    if cid=$$("$$rt" create "$$img" 2>/dev/null) \
+       && "$$rt" cp "$$cid:/usr/local/bin/ralph_dashboard.py" "$$dtmp" 2>/dev/null; then
+      "$$rt" rm "$$cid" >/dev/null 2>&1 || true
+    fi
+    if [ -s "$$dtmp" ]; then
+      python3 "$$dtmp" --state-dir "$$sd" --workspace "$$ws" --runtime "$$rt" \
+        --container "$$img" --tasks "$$ws/tasks.md" & dpid=$$!
+    else
+      echo "ralph: could not extract the dashboard viewer from $$img - skipping dashboard" >&2
+    fi
+  else
+    echo "ralph: RALPH_DASHBOARD=1 but host python3 not found - skipping dashboard" >&2
+  fi
+fi
+trap '[ -n "$$dpid" ] && kill "$$dpid" 2>/dev/null; [ -n "$$dtmp" ] && rm -f "$$dtmp"' EXIT
+"$$rt" run --rm -it "$$@" --name "$$img" "$$img" ralph.sh
+endef
+export RALPH_LOOP_RUN
+
 loop: hooks check-base
 	@mkdir -p $(CLAUDE_DIR)
-	$(RUNTIME) run --rm -it $(RUN_FLAGS) --name $(IMAGE) $(IMAGE) ralph.sh
+	@bash -c "$$RALPH_LOOP_RUN" ralph_loop $(RUNTIME) $(IMAGE) "$(WORKSPACE)" "$${RALPH_DASHBOARD:-}" $(RUN_FLAGS)
 
 loop-once: hooks check-base
 	@mkdir -p $(CLAUDE_DIR)

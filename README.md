@@ -78,7 +78,7 @@ repo-wide: once set, it gates *every* commit, host or container. The gate runs w
 its toolchain lives — the container — so host-side committers need that toolchain
 locally or should commit via `make shell`.
 
-## Outer-loop review gate (opt-in)
+## Outer-loop review gate (on by default)
 
 The local gate above is the *inner* loop. There is also an **outer loop**
 (`RALPH_REVIEW_GATE`, **on by default**): after a committing turn the runner pushes
@@ -178,9 +178,16 @@ See `templates/ralph.conf.example` for every key. `/ralph-init` fills it for you
 The loop is a **log source**: it writes `.ralph/status.jsonl` (structured, one record per turn) and,
 with `RALPH_LIVE_LOG=1` (default), an append-only `.ralph/log/live.log` that interleaves runner
 narration with agent output, every line turn-prefixed — one stable `tail -f` target. Point your own
-aggregator at the bind-mounted files; the kit ships no dashboard and opens no port. See
+aggregator at the bind-mounted files. See
 [`docs/recipes/vector-console.md`](docs/recipes/vector-console.md) for a zero-backend Vector recipe
 (console sink + `vector top`) that also centralizes several loops via one glob.
+
+For a glanceable built-in view, set `RALPH_DASHBOARD=1` (opt-in, default off) and `make loop`
+auto-launches an ephemeral localhost web dashboard — a churn-weighted Commit Ribbon, an X/N task arc,
+and a stakes strip (rate-limit countdown, stall-pressure meter, review-round pips) that lights only
+while the loop is live, tearing itself down when the loop ends. It runs **host-side** against the
+bind-mounted `.ralph/`, so the **loop container stays port-free** — the "log source, not a service"
+stance is intact. See [`docs/recipes/dashboard.md`](docs/recipes/dashboard.md).
 
 ## Getting summoned back
 

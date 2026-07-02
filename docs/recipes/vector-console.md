@@ -115,8 +115,9 @@ are the same one-block swap — Vector is by Datadog, so `datadog_logs` is first
 
 There is none to install. The globs (`/home/you/projects/*/.ralph/...`) already match every loop on
 the host, and `.project` (derived from each file's path) keeps them separable in one place. Aggregation
-lives entirely in **your** Vector config — the kit ships no dashboard, no endpoint, and no aggregation
-code.
+lives entirely in **your** Vector config — the kit ships no aggregation backend, endpoint, or
+cross-loop centralization code. (The opt-in built-in dashboard — see
+[`dashboard.md`](dashboard.md) — is deliberately single-loop and host-side, not a centralizer.)
 
 ## When you can't run a host-side shipper
 

@@ -511,7 +511,9 @@ ensure_pr() {
   local repo_args=()
   while IFS= read -r w; do repo_args+=("$w"); done < <(repo_args_words)
 
-  num=$(gh pr view "${repo_args[@]}" --json number --jq .number 2>/tmp/.ralph_prview.$$)
+  local branch
+  branch=$(working_branch)
+  num=$(gh pr view "$branch" "${repo_args[@]}" --json number --jq .number 2>/tmp/.ralph_prview.$$)
   rc=$?
   out=$(cat /tmp/.ralph_prview.$$ 2>/dev/null); rm -f /tmp/.ralph_prview.$$
   # A non-zero `pr view` is the BENIGN "no PR yet" case when stderr is empty OR says
@@ -525,13 +527,13 @@ ensure_pr() {
     return 0
   fi
   if [ -z "$num" ]; then
-    if ! out=$(gh pr create "${repo_args[@]}" --base "$(base_branch)" --head "$(working_branch)" --fill \
-                 --title "ralph: $(working_branch)" \
+    if ! out=$(gh pr create "${repo_args[@]}" --base "$(base_branch)" --head "$branch" --fill \
+                 --title "ralph: $branch" \
                  --body "Automated Ralph loop branch. Review input is the diff + repo state only." 2>&1); then
       narrate "ralph: gh pr create FAILED: ${out}" >&2
       return 0
     fi
-    num=$(gh pr view "${repo_args[@]}" --json number --jq .number 2>/dev/null)
+    num=$(gh pr view "$branch" "${repo_args[@]}" --json number --jq .number 2>/dev/null)
   fi
   printf '%s\n' "$num"
 }

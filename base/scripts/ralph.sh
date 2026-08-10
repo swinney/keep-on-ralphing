@@ -819,6 +819,13 @@ trap on_exit EXIT
 
 trap 'echo; _sig="ralph: caught SIGINT at turn $turn, exiting"; echo "$_sig"; halt_class="sigint"; _live_append "$_sig"; exit 130' INT
 
+# Tasks file: must be readable before the loop starts. A missing/dangling file
+# means the agent gets no task and burns turns silently until max-stalls.
+if [ ! -r "$tasks_file" ]; then
+  echo "ralph: tasks file '$tasks_file' is not readable — set RALPH_TASKS to a valid path (default: tasks.md; see ralph.conf)" >&2
+  exit 1
+fi
+
 # Per-invocation run identity. .ralph/ is never cleared between runs, so a reader
 # needs a way to tell THIS run's state from a previous run's leftovers. Stamp it
 # once and export it so every emit_status / merge write carries it (the python

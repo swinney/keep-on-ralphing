@@ -340,6 +340,42 @@ sys.exit(0 if good else 1)
 PY
 cleanup
 
+# --- 19. missing tasks file → refuse, exit non-zero, name the path ----------
+new_ws
+rm -f "$WS/tasks.md"
+out=$(RALPH_ARGS="--once" run_ralph 2>&1)
+ec=$?
+[ "$ec" -ne 0 ] && printf '%s' "$out" | grep -qi 'tasks' \
+  && ok "missing tasks file refuses to start and names it" \
+  || bad "missing tasks file should refuse (exit=$ec)"
+cleanup
+
+# --- 20. dangling tasks symlink → same refusal as absent -------------------
+new_ws
+rm -f "$WS/tasks.md"
+ln -s openspec/changes/does-not-exist/tasks.md "$WS/tasks.md"
+out=$(RALPH_ARGS="--once" run_ralph 2>&1)
+ec=$?
+[ "$ec" -ne 0 ] && printf '%s' "$out" | grep -qi 'tasks' \
+  && ok "dangling tasks symlink refuses to start" \
+  || bad "dangling tasks symlink should refuse (exit=$ec)"
+cleanup
+
+# --- 21. explicit RALPH_TASKS to a valid file still works -------------------
+new_ws
+mkdir -p "$WS/openspec/changes/test"
+printf -- '- [ ] 1.1 test task\n' > "$WS/openspec/changes/test/tasks.md"
+echo 'RALPH_TASKS=openspec/changes/test/tasks.md' > "$WS/ralph.conf"
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+RALPH_ARGS="--once" run_ralph >/dev/null 2>&1
+ec=$?
+[ "$ec" -eq 0 ] \
+  && ok "explicit RALPH_TASKS to a valid file still works" \
+  || bad "explicit RALPH_TASKS should work (exit=$ec)"
+cleanup
+
 echo
 echo "ralph.sh runner tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

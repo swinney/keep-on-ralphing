@@ -485,6 +485,23 @@ printf '%s' "$out" | grep -qi "review-gate PASS" \
   || bad "(false PASS) no synthetic 'review fetch failed' finding written"
 cleanup
 
+# --- 21. (B) gh pr view passes the branch as a positional when --repo is set ------
+# `gh pr view --repo owner/name --json number` fails because --repo disables local
+# checkout inference; the branch must be passed as a positional argument.
+new_gate_ws
+cat >"$STUB/count-1.sh" <<'S'
+git commit --allow-empty -qm work
+S
+cat >"$STUB/count-2.sh" <<'S'
+printf 'done: stop\n' >STATUS.md
+git commit --allow-empty -qm t2
+S
+RALPH_ARGS="" run_gate RALPH_REPO=acme/widgets >/dev/null 2>&1
+grep "pr view" "$STUB/gh.log" | grep -- "--json number" | grep -q "feat" \
+  && ok "(B) gh pr view passes the branch as a positional with --repo" \
+  || bad "(B) gh pr view missing branch positional alongside --repo"
+cleanup
+
 echo
 echo "review-gate tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -18,14 +18,15 @@ around it, so every new project rebuilds it by hand or does without.
 - **`gh-nightly`, a second plugin in this marketplace** — the GitHub-issue→PR nightly
   workflow, with `ralph-harness` as its executor. The two are a matched pair: the loop does
   the work, `gh-nightly` decides what work there is and reviews the result.
-- **A layout decision, pending (see `design.md` D3).** To seat a sibling plugin, either
-  `ralph-harness` moves from the marketplace root (`"source": "./"`) into
-  `plugins/ralph-harness/` — **BREAKING for repo layout, not behavior**, moving `base/`,
-  `Makefile`, `skills/`, `templates/`, `example/`, CI and test paths together — or it stays at
-  the root and only the new plugin takes a subdirectory. No requirement changes either way, since
-  `$CLAUDE_PLUGIN_ROOT` resolves dynamically. The symmetric option is a large mechanical diff
-  against a green suite and must land as its own content-free commit; the asymmetric option
-  avoids that churn entirely. Resolved before implementation begins.
+- **BREAKING (repo layout, not behavior):** `ralph-harness` moves from the marketplace root
+  (`"source": "./"`) into `plugins/ralph-harness/`, so plugin roots are disjoint. `base/`,
+  `Makefile`, `skills/`, `templates/`, `example/`, CI paths and test paths all move together. No
+  requirement changes — `$CLAUDE_PLUGIN_ROOT` resolves dynamically. The zero-churn alternative
+  (leave `ralph-harness` at the root, nest only the new plugin) was **rejected as unsound**: a
+  root-sourced plugin's release tree contains its siblings, so a `gh-nightly`-only edit would also
+  change `ralph-harness`'s tree, contradicting independent versioning. Disjoint roots is the only
+  layout in which that requirement is implementable. The move lands as its own content-free commit
+  with the gate green on both sides.
 - **13 skills in `gh-nightly`.** Ten generalized from the operator's set (`nightly-triage`,
   `nightly-explore`, `nightly-drain`, `nightly-review`, `pr-review-response`,
   `followup-issue`, `resolve-parked`, `weekly-report`, `track-work`, and
@@ -41,16 +42,30 @@ around it, so every new project rebuilds it by hand or does without.
   (`DRAIN_WORKSPACE`, `DRAIN_REPO`, `DRAIN_LOOP_CMD`, `DRAIN_BASE_BRANCH`, …), so
   generalizing it is mostly removing the project-specific defaults so config becomes *required*.
   Its five existing shell test suites come along as the evidence that behavior survived.
-- **One config file.** `gh-nightly.conf`, shell-sourceable, `EnvironmentFile=`d by the units
-  and read by each skill as its first step. Keeps the `DRAIN_*` names so the supervisor needs
-  no rewiring.
+- **Two configs, split by trust, never shell-sourced.** Host-execution settings (workspace,
+  executor command, agent binary, models, baseline deny globs) are operator-owned and live outside
+  the consumed repo; only inert descriptors (repo slug, trunk, gate command, labels, branch
+  pattern, tracker visibility, report sink) are tracked in the consumer. Both use one restricted
+  `KEY=VALUE` grammar — no substitution, no expansion, unknown keys rejected — chosen as the
+  intersection of what the service manager and a strict reader both accept, so the two readers
+  cannot silently disagree. Deny globs are **additive-only**: a repo can broaden the restriction on
+  itself, never narrow it. Keeps the `DRAIN_*` key names so the supervisor needs no rewiring.
+- **Concurrency is specified, not assumed.** A per-repository host lock plus an atomic claim
+  protocol with stale-claim recovery reconciled against branch and pull-request state — because a
+  one-issue-per-invocation budget cannot stop two invocations selecting the same issue.
+- **Prerequisites are enforced, not merely documented.** Each carries a minimum version and
+  required capability; onboarding, health-check and upgrade fail fast on a missing or incompatible
+  dependency, including an incompatible companion-plugin pair.
 - **`nightly-doctor` is earned, not speculative.** An issue in the operator's tracker sat
   unworked for multiple nights because a systemd timer was `disabled` rather than absent, and
   nothing in the stack noticed. Verifying *enabled*, not merely *installed*, is a requirement.
-- **A publication scrub gate.** `make scrub-check`, wired into CI and the pre-commit hook,
-  fails on private-infrastructure tokens (internal hostnames, private repo slugs, absolute
-  operator paths, secret paths, tracker project/task IDs, internal ports). It lands **before**
-  any extracted content, so nothing unscrubbed can be committed even once.
+- **A layered publication scrub with a stated threat model.** `make scrub-check`, wired into CI and
+  the pre-commit hook, lands **before** any extracted content so nothing unscrubbed is ever
+  committed. Crucially it stores **no literal private value** — the pattern file is itself tracked
+  content, so it carries structural patterns plus salted digests, with synthetic fixtures. A second,
+  pattern-independent entropy and credential-shape layer catches tokens nobody enumerated. The
+  guarantee is explicitly *not* absolute: unlisted, paraphrased, split or encoded values remain out
+  of scope and human review still applies.
 - **Declared prerequisites, not adapters:** `ralph-harness`, OpenSpec, `gh`, systemd user
   units, `jq`. This matches the repo's existing narrow scope (Linux + podman) and keeps the
   product honest — it is the one configuration that actually runs nightly.
@@ -88,10 +103,9 @@ product, and excluding them is also what keeps private infrastructure out of a p
 
 ## Impact
 
-- **Repo layout:** under the symmetric option every path in `ralph-harness` moves one level down —
-  `Makefile`, CI workflow, `base/tests/*` relative paths, `.claude-plugin/` location, and the
-  root-relative path documentation in `CLAUDE.md` all follow. Under the asymmetric option only
-  the marketplace manifest gains an entry.
+- **Repo layout:** every path in `ralph-harness` moves one level down — `Makefile`, CI workflow,
+  `base/tests/*` relative paths, `.claude-plugin/` location, and the root-relative path
+  documentation in `CLAUDE.md` all follow.
 - **Release channels:** a second `plugin.json` to version. The repo's existing rule — a
   `skills/` or `templates/` change without a version bump makes `/plugin update` a silent
   no-op — now applies twice, independently.
@@ -102,6 +116,8 @@ product, and excluding them is also what keeps private infrastructure out of a p
   reappear and shadow the plugin versions.
 - **Private repo:** the extracted supervisor scripts remain deployed there until the operator's
   own project is cut over to the plugin; the two coexist during migration.
-- **Acceptance is a live night, not a green suite:** the operator's project becomes the first
-  consumer, its values in a `gh-nightly.conf`, draining a real issue to a real PR through the
-  generic plugin with unchanged behavior.
+- **Acceptance is fault-path coverage, with the live night as the last gate:** a
+  requirement-to-test traceability matrix (an unmapped requirement blocks release), fault-injected
+  runs for every supervision and recovery invariant including a rehearsed rollback, and only then
+  multiple live scheduled cycles on the first consuming project. One green night proves the happy
+  path and none of the expensive failure paths this design exists to get right.

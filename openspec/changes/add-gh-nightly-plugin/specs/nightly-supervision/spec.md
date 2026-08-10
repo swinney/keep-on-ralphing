@@ -105,3 +105,52 @@ pruned so a reclaim cannot collide with a leftover branch name.
 #### Scenario: Cleanup runs even on abnormal exit
 - **WHEN** the run exits by error or signal
 - **THEN** the trap still removes the handoff and restores the base branch
+
+### Requirement: A per-repository run lock SHALL prevent overlapping invocations
+
+The supervisor SHALL acquire a per-repository host lock before selecting or claiming any issue, and
+SHALL exit without claiming if the lock is held by a live invocation. The one-issue-per-invocation
+rule bounds a single run only; without a lock, a schedule that fires while a previous run is still
+working — or a manual invocation alongside a scheduled one — can select the same issue, produce
+duplicate branches and pull requests, or mutate the isolated checkout from two processes at once.
+A lock held by a process that no longer exists SHALL be treated as stale and reclaimed, with the
+reclaim recorded.
+
+#### Scenario: A second invocation declines while the first is live
+- **WHEN** an invocation starts while another holds the lock and is still running
+- **THEN** the second exits successfully without claiming any issue, recording that it deferred
+
+#### Scenario: A lock from a dead process does not wedge the schedule
+- **WHEN** the lock file exists but its owning process is gone
+- **THEN** the new invocation reclaims the lock, records the reclaim, and proceeds
+
+#### Scenario: The isolated checkout is never mutated concurrently
+- **WHEN** two invocations are attempted simultaneously
+- **THEN** only one ever operates on the isolated checkout
+
+### Requirement: Claiming an issue SHALL be atomic and recoverable from observable state
+
+Claiming SHALL be atomic with respect to other invocations, and recovery SHALL reconcile against
+observable state — branch existence, pull-request existence and pull-request state — rather than
+trusting the claim label alone, because a label read followed by a label write is not atomic and a
+run can die between any two steps. A claim whose issue has no branch and no pull request ever
+SHALL be treated as a crashed run's stale claim and be reclaimable. A claim whose pull request was
+closed unmerged SHALL NOT be reclaimed — that is a rejected fix, not a crash — and SHALL be routed
+to the human-decision label. Only a live open pull request SHALL mean "in flight".
+
+#### Scenario: A crashed run's claim is reclaimed
+- **WHEN** an issue carries the in-flight label but no branch or pull request has ever existed
+- **THEN** the next invocation reclaims it and proceeds
+
+#### Scenario: A human-rejected fix is not retried
+- **WHEN** an issue carries the in-flight label and its pull request was closed unmerged
+- **THEN** the run routes it to the human-decision label and does not reclaim it
+
+#### Scenario: A restart between pull-request creation and relabeling does not duplicate work
+- **WHEN** a run is interrupted after opening the pull request but before advancing labels
+- **THEN** the next invocation observes the open pull request, treats the issue as in flight, and
+  opens no second branch or pull request
+
+#### Scenario: Two invocations cannot both claim one issue
+- **WHEN** two invocations attempt to claim the same issue
+- **THEN** at most one claim succeeds and the other observes the existing claim

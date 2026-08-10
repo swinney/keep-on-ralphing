@@ -34,7 +34,10 @@ Release runs through two channels with unlinked versions, and the Skill tool loa
   lookups; it does not re-litigate the taxonomy or the `auto-ok` bar.
 - Make the supervision layer — the part that took production incidents to get right —
   shippable rather than describable.
-- Make private-infrastructure leakage impossible by machine, not by checklist.
+- Reduce private-infrastructure leakage to a machine-enforced, layered check rather than a
+  checklist — without the pattern list itself becoming the disclosure.
+- Keep host execution authority out of the consumed repository: nothing the unattended agent can
+  write may decide what the host runs, or relax the constraints placed on it.
 - Keep the two plugins independently versioned, consistent with the repo's existing
   two-channel release doctrine.
 
@@ -61,6 +64,12 @@ and `RALPH_TASKS`; the env var stays, but it is an implementation detail, not a 
 
 This also matches the repo's own precedent of narrowing scope on purpose.
 
+**Declared is not enough — prerequisites must be enforced.** A documented dependency list fails
+silently: two independently-versioned plugins can install into an incompatible pair and the first
+symptom is a broken unattended run at 02:00. Each prerequisite therefore carries a minimum
+version and a required capability, and onboarding, health-check and upgrade all fail fast on a
+missing or incompatible dependency rather than deferring the discovery to a run.
+
 ### D2: Second plugin in this marketplace, not a new repo
 
 `marketplace.json` takes a `plugins` array with per-plugin relative `source` paths, so one
@@ -72,37 +81,124 @@ a second marketplace and splits a matched pair); folding the new skills into `ra
 itself (single install, but bloats a deliberately narrow plugin and imposes the GitHub
 workflow on loop-only users).
 
-### D3: Relocation shape — OPEN, see Open Questions
+### D3: Symmetric relocation — RESOLVED, the alternative was unsound
 
-The approved plan moves `ralph-harness` from `"source": "./"` to `plugins/ralph-harness/` so
-both plugins sit symmetrically under `plugins/`.
+`ralph-harness` moves from `"source": "./"` to `plugins/ralph-harness/` so both plugins sit
+under disjoint roots below `plugins/`. Plugin roots MUST be disjoint: neither plugin's release
+tree may contain the other's files.
 
-Investigation after approval showed the cost is larger than it looked: `base/`, `Makefile`,
-`skills/`, `templates/`, `example/`, `extras/`, `.claude-plugin/`, the CI workflow, every
-relative path inside `base/tests/*`, and the extensive root-relative path documentation in
-`CLAUDE.md` all move at once — a large mechanical diff against a currently-green suite, on the
-one artifact already published to installs.
+*Zero-churn alternative, rejected as contradictory.* Leaving `ralph-harness` at `"source": "./"`
+and adding only `./plugins/gh-nightly` looked free — the docs require no symmetry, and skill
+discovery scans `<plugin-root>/skills/` only, so a nested directory is inert to discovery. But a
+root-sourced plugin's release tree *contains* its sibling, so every `gh-nightly`-only edit also
+changes the `ralph-harness` source tree. That directly contradicts the independent-versioning
+requirement in `specs/marketplace-multi-plugin/spec.md`: a change confined to one plugin must
+require only that plugin's version bump. Preserving both would need an undocumented exclusion
+rule inside the version-conformance check — i.e. the check could no longer use ordinary tree
+semantics. Disjoint roots is the only layout where the versioning requirement is honestly
+implementable.
 
-*Zero-churn alternative:* leave `ralph-harness` at `"source": "./"` and add only
-`{"name": "gh-nightly", "source": "./plugins/gh-nightly"}`. The docs require no symmetry.
-Cost: the root-sourced plugin's tree nominally contains its sibling, so `ralph-harness`
-downloads carry the second plugin's files; skill discovery is unaffected because it scans
-`<plugin-root>/skills/` only, and a nested `plugins/` directory is inert.
+The cost is real and accepted: `base/`, `Makefile`, `skills/`, `templates/`, `example/`,
+`extras/`, `.claude-plugin/`, the CI workflow, every relative path inside `base/tests/*`, and the
+root-relative path documentation in `CLAUDE.md` all move at once — a large mechanical diff against
+a currently-green suite, on the one artifact already published to installs. Mitigation: the move
+lands as its own commit with **zero content change** and `make test` green on both sides, and the
+release-tree boundary gets an explicit test that changing either plugin leaves the other's package
+byte-identical.
 
-Trade: symmetric is cleaner to reason about forever; asymmetric risks nothing today. If
-symmetric is chosen, the move MUST land as its own commit with zero content change and
-`make test` green on both sides.
+### D4: Two configs split by trust, strictly parsed, never shell-sourced
 
-### D4: One shell-sourceable config file, keeping the `DRAIN_*` names
+The original single shell-sourceable file in the consuming repo was **unsound** and is replaced.
+Two defects, both real:
 
-`gh-nightly.conf` in the consuming repo, `EnvironmentFile=`d by the systemd units and read by
-each skill as its documented first step. Retaining the `DRAIN_*` prefix means the extracted
-supervisor needs no rewiring at all — the diff stays confined to deleted defaults.
+1. **It crossed the host trust boundary.** The file was tracked in the very repo the unattended
+   agent can write. Anything the host `source`s from there is host code execution controlled by
+   repo content — a branch, or the loop itself, could inject shell syntax, rewrite the executor
+   command, or *weaken the control-plane deny globs* that are supposed to constrain it.
+2. **The two readers would silently disagree.** `systemd EnvironmentFile=` is not a shell parser:
+   it does no command substitution, no `$VAR` expansion, no quoting-driven word splitting. A file
+   that `source` interprets one way and systemd another produces different effective values for
+   the same key with no error anywhere.
 
-*Alternatives considered.* A block in the consumer's `CLAUDE.md` (the `spec-driven-onboard`
-pattern) — good for skills, useless to systemd, which cannot source prose. Plugin-level
-settings/env — invisible to the units and not per-repo. A `.conf` serves both readers, and
-mirrors `ralph.conf`, which operators of this marketplace already understand.
+The replacement splits by *who is trusted to set it*:
+
+- **Host config — operator-owned, outside the consumed repo.** Everything selecting what executes
+  on the host: workspace/bot-checkout path, executor command, agent binary and settings path,
+  model identifiers, timeouts, and the **baseline** control-plane deny globs. The unattended agent
+  cannot write this path.
+- **Project config — repo-owned, tracked in the consumer.** Inert descriptors only: repo slug,
+  trunk branch, gate command, branch-name pattern, label overrides, tracker visibility, report
+  sink. No value here selects a host binary or path.
+
+Both use one restricted, strictly-parsed grammar: `KEY=VALUE`, one pair per line, no
+substitution, no expansion, no interpolation, unknown keys rejected. This is deliberately the
+*intersection* of what systemd accepts and what a strict reader can parse, so parity is
+structural rather than hoped for. Nothing is ever `source`d.
+
+**Deny globs are additive-only.** The effective control-plane deny list is the union of the
+operator baseline and any repo additions. A repo can broaden the restriction on itself; it can
+never narrow one. This closes the escalation path where editing a tracked file relaxes the hook
+meant to police that same tree.
+
+Before privileged use the host validates ownership and permissions of the host config and refuses
+if either is unsafe. Retaining the `DRAIN_*` key names keeps the extracted supervisor's diff
+confined to deleted defaults.
+
+*Alternatives considered.* A single strictly-parsed file with no trust split — still lets repo
+content set the executor command. Signing the repo file — key management for no gain over simply
+keeping host settings out of the repo. A block in the consumer's `CLAUDE.md` (the
+`spec-driven-onboard` pattern) — readable by skills, meaningless to systemd. Plugin-level
+settings — invisible to the units and not per-repo.
+
+### D12: Concurrency is a specified protocol, not an emergent property
+
+The one-issue-per-invocation rule bounds a *single* run and says nothing about two runs. Because
+the schedule fires repeatedly and an operator can invoke by hand, two invocations can select the
+same opt-in issue before either advances its labels — producing duplicate branches, duplicate
+pull requests, or two processes mutating one isolated checkout.
+
+The design therefore specifies a **per-repository host lock** taken before any claim, and an
+**atomic claim protocol** with explicit stale-claim recovery. This is partly a formalization: the
+extracted system already claims via an in-flight label and already distinguishes a crashed run's
+stale claim (label present, no pull request ever) from a human-rejected fix (label present, pull
+request closed unmerged), and `ralph-harness` carries a one-orchestrator workspace lock. What was
+missing is any *requirement* — none of it was specified, and a label read-then-write is not atomic
+regardless.
+
+Recovery is defined by reconciling against observable state rather than trusting the label: branch
+existence, pull-request existence and state. That makes the restart-after-pull-request-but-before-
+relabel window recoverable instead of ambiguous.
+
+### D13: The scrub is a threat model with layers, not an absolute guarantee
+
+The original claim — whole-repo scan, no exemptions, leakage impossible — could not be
+implemented as stated, for a reason worth recording: **the pattern list is itself tracked
+content.** A pattern that literally spells a private hostname makes the pattern file trip its own
+check. Bootstrapping around that by exempting the pattern file reintroduces the allowlist the
+decision was trying to avoid.
+
+The resolution keeps the whole-repo scope but changes what lives in the repo:
+
+- **No literal private value is ever stored in tracked content.** The repo holds *structural*
+  patterns (absolute home-directory paths, secret-store paths, private-slug shapes, internal port
+  numbers) plus a list of **salted digests** for literal private values. Matching compares token
+  digests, so the literal never appears.
+- **Fixtures are synthetic look-alikes**, never real values, so the fixture-matching test proves
+  pattern well-formedness without importing anything sensitive.
+- **A second, pattern-independent layer**: high-entropy string and known-credential-shape
+  detection, which catches tokens nobody thought to list. Pattern matching alone only ever finds
+  what someone already enumerated.
+- **Narrow, individually justified exclusions are permitted** for test data, each requiring an
+  inline reason — replacing a blanket "no allowlist" rule that the design could not honor.
+
+What remains true and worth keeping: the check is armed before any extracted content lands, it
+covers planning artifacts as well as plugin trees, and the near-miss requirement stands — an
+unanchored pattern that fires on ordinary prose (the earlier `archi` / "architecture" collision)
+must fail its own test, because a noisy check gets disabled and then protects nothing.
+
+*Alternative considered.* Keeping the absolute guarantee and hiding patterns in an untracked
+operator file only. Rejected: a check whose rules live nowhere in the repo cannot be reviewed,
+and a fresh clone would silently scan for nothing. Digests give reviewability without disclosure.
 
 ### D5: `nightly-upgrade` as its own skill, not an extension of `/ralph-upgrade`
 
@@ -160,11 +256,31 @@ skip-level-framed report — with a file sink as the default and a task-tracker 
 option. The operator's specific upload and mail plumbing moves to `extras/`, this repo's
 established unsupported directory.
 
-### D11: Acceptance is a live night on the operator's own project
+### D11: Acceptance is fault-path coverage; the live night is a canary on top
 
-The operator's project becomes the first consumer, its values in a `gh-nightly.conf`, its live
-nightly pointed at the extracted plugin. Passing means a real issue drained to a real PR with
-unchanged behavior — not a green suite.
+A single successful night proves only the happy path. It does not exercise an empty queue, a
+bounced candidate, a halted executor, a start-timeout kill, cleanup after a signal, public-tracker
+redaction, a disabled timer, upgrade drift, overlapping invocations, or rollback — which is
+precisely the set of expensive paths this design exists to get right. Releasing on one green night
+could ship a system whose failure handling is entirely broken.
+
+Acceptance is therefore three things, in order:
+
+1. **A requirement-to-test traceability matrix.** Every requirement in the six capability specs
+   maps to at least one test or an explicit, reasoned waiver. An unmapped requirement blocks
+   release — that is what makes the specs falsifiable rather than decorative.
+2. **Fault-injected end-to-end runs** for the supervision and recovery invariants: empty queue,
+   candidate bounce, executor halt, timeout kill, signal mid-run, overlapping invocation, stale
+   claim, restart between pull-request creation and relabeling, unreachable report sink, and a
+   rehearsed rollback. These are scoped to supervision/recovery rather than "every requirement"
+   because that is where silent failure is both likely and costly, and because the five inherited
+   suites already give these paths a harness.
+3. **Multiple live scheduled cycles**, then release. The live night stays — it catches integration
+   reality no fixture reproduces — but as the last gate, not the only one.
+
+*Alternative considered.* Fault-inject every requirement across all six capabilities. Rejected as
+disproportionate: the operator-present skills fail visibly in front of a human, so their failure
+modes are self-revealing in a way an unattended 02:00 path is not.
 
 ## Risks / Trade-offs
 
@@ -192,31 +308,56 @@ unchanged behavior — not a green suite.
   units in the same step that installs the new ones.
 - **systemd-only excludes non-Linux operators** → accepted, consistent with the repo's stated
   scope.
+- **Repo content escalating into host execution** → the trust split in D4: host-execution settings
+  live outside the consumed repo, nothing is `source`d, deny globs are additive-only, and ownership
+  and permissions are validated before privileged use. Tested with injection strings, not just
+  well-formed input.
+- **The two config readers diverging silently** → one restricted grammar that is the intersection
+  of what systemd and a strict reader both accept, with an explicit parser-parity test asserting
+  both readers derive identical values from the same file.
+- **Two invocations claiming the same issue** → per-repository host lock plus an atomic claim
+  protocol, with recovery reconciled against branch and pull-request state rather than the label
+  alone (D12).
+- **The scrub's pattern list leaking the values it protects** → structural patterns plus salted
+  digests and synthetic fixtures, so no literal private value is ever tracked (D13).
+- **Unlisted secrets passing a pattern-only scrub** → a second, pattern-independent entropy and
+  credential-shape layer; pattern matching alone only finds what someone enumerated.
+- **An incompatible plugin pair discovered at 02:00** → versioned prerequisites enforced at
+  onboarding, health-check and upgrade time, with version-skew tests (D1).
+- **Requirements that no test maps to** → the traceability matrix gates release; an unmapped
+  requirement is a release blocker, not a footnote (D11).
 
 ## Migration Plan
 
-1. Scrub gate + its fixture test, wired to CI and pre-commit. Nothing extracted yet.
-2. Relocation (per D3 resolution) as a content-free commit; `make test` green both sides.
+1. Scrub gate — structural patterns, salted digests, synthetic fixtures, entropy layer — wired to
+   CI and pre-commit. Nothing extracted yet, so the gate is armed before it has anything to catch.
+2. Relocation to disjoint plugin roots as a content-free commit; `make test` green both sides;
+   release-tree boundary test proving each plugin's package excludes the other.
 3. `gh-nightly` skeleton: `plugin.json`, marketplace entry, empty skills/supervisor trees.
-   Verify the marketplace re-resolves and both plugins install.
+   Verify the marketplace re-resolves and both plugins install and update independently.
 4. Supervisor extraction. Copy scripts and the five suites verbatim; run them to establish a
-   baseline; then delete project defaults so config becomes required; suites green again.
+   baseline; then delete project defaults so config becomes required; suites green again. Add the
+   run lock and atomic claim protocol with their concurrency tests.
 5. Skills genericization, ten skills, proper nouns → config reads. Taxonomy untouched.
-6. Config contract + `nightly-onboard` / `nightly-doctor` / `nightly-upgrade` + provenance
-   manifest + a golden reference for the rendered output.
-7. Cutover: write the operator's `gh-nightly.conf`, install the rendered units, disable the
+6. Config contract — the host/project trust split, the restricted grammar, the parser-parity and
+   injection tests, the typed key schema with its per-consumer dependency table — plus
+   `nightly-onboard` / `nightly-doctor` / `nightly-upgrade`, the provenance manifest, and a golden
+   reference for the rendered output.
+7. Traceability matrix: every requirement mapped to a test or a reasoned waiver. Unmapped
+   requirements block progress past this point.
+8. Fault-injected end-to-end runs for the supervision and recovery invariants, including a
+   rehearsed rollback.
+9. Cutover: write the operator's host and project configs, install the rendered units, disable the
    private repo's units in the same step, `chezmoi forget` + delete the ten moved skills.
-8. One live night. Then bump both `plugin.json` versions and release.
+10. Multiple live scheduled cycles. Then bump both `plugin.json` versions and release.
 
-**Rollback:** through step 6 nothing user-facing has changed — revert the branch. After step 7,
+**Rollback:** through step 8 nothing user-facing has changed — revert the branch. After step 9,
 rollback is re-enabling the private repo's units and `chezmoi apply` to restore the dotfile
-skills; keep the private copies in place until a live night has passed.
+skills. The rollback is *rehearsed* in step 8 rather than first attempted under pressure, and the
+private copies stay in place until the live cycles in step 10 have passed.
 
 ## Open Questions
 
-- **D3: symmetric relocation or the zero-churn asymmetric layout?** The approved plan is
-  symmetric; the churn evidence surfaced only after approval. Needs an explicit call before
-  step 2, because it determines whether step 2 exists at all.
 - **`weekly-report` and `track-work` — generalize or leave behind?** Both carry the most
   personal configuration (report framing, tracker project, upload destination) and the least
   mechanism. Shipping them with a file-only default sink is cheap; shipping them at all may be

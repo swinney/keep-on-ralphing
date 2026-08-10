@@ -59,7 +59,10 @@ real priority and downgrade a reduced-cost tier to the default rather than trust
 A drain invocation SHALL open at most one pull request. On encountering a candidate that needs
 deployment access or a human decision, it SHALL relabel that candidate, continue to the next
 candidate, and NOT count the bounce against its one-issue budget. An empty queue, or a queue
-whose every candidate is routed away, SHALL be reported as success.
+whose every candidate is routed away, SHALL be reported as success. This requirement bounds a
+single invocation only; exclusion *between* invocations is specified separately as a run lock and
+an atomic claim protocol in `nightly-supervision`, since a per-invocation budget cannot prevent two
+invocations selecting the same issue.
 
 #### Scenario: A bounced candidate does not end the run
 - **WHEN** the top candidate is routed to the deployment-required label

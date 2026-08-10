@@ -2,13 +2,19 @@
 
 ### Requirement: The operator-present skills work without any scheduler
 
-The pull-request review, issue-filing, parked-backlog and reporting skills SHALL be usable with
-only the configured repository slug and trunk branch present — requiring no installed service
-units, no isolated checkout, and no executor image.
+The pull-request review, issue-filing, parked-backlog and reporting skills SHALL declare, in the
+configuration schema, that they require only project-config keys — and SHALL therefore run with no
+host config, no installed service units, no isolated checkout, and no executor image. Their
+required-key sets are whatever the schema declares for each; this requirement asserts only that no
+host-config key appears among them.
 
 #### Scenario: Review response runs on a machine with no units installed
 - **WHEN** an operator invokes the review-response skill having never onboarded the scheduler
-- **THEN** it runs, reading only the values it needs from configuration
+- **THEN** it runs, because every key its schema entry marks required lives in the project config
+
+#### Scenario: No operator-present skill requires a host-config key
+- **WHEN** the schema is checked for these four skills
+- **THEN** none of their required-key sets contains a host-config key
 
 ### Requirement: Review findings are verified against the code before any action
 
@@ -58,8 +64,9 @@ refused to make.
 ### Requirement: Reports are quantified and sink-agnostic
 
 The reporting skills SHALL assemble a quantified summary written for a non-specialist reader and
-SHALL write it to the configured sink, defaulting to a local file. A sink that is unreachable
-SHALL NOT fail the report — the local file is the fallback.
+SHALL write it to the configured sink. The sink key SHALL be declared optional in the schema with a
+local-file default, so an unset sink resolves to that default rather than halting the skill. A
+configured sink that is unreachable SHALL NOT fail the report — the local file is the fallback.
 
 #### Scenario: An unreachable tracker degrades to a file
 - **WHEN** the configured tracker sink cannot be reached

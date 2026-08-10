@@ -15,6 +15,22 @@ relative paths and SHALL NOT be the distribution mechanism.
 - **WHEN** the marketplace is added from its git repository
 - **THEN** each relative `source` resolves to a directory containing that plugin's manifest
 
+### Requirement: Plugin roots SHALL be disjoint
+
+Each plugin's release tree SHALL be disjoint from every other plugin's: no plugin's source root may
+contain another plugin's files. A plugin rooted at the marketplace root would contain its siblings,
+so an edit confined to one plugin would also change the root plugin's release tree — making
+independent versioning unimplementable without an undocumented exclusion rule inside the version
+check. A test SHALL assert that changing one plugin leaves the other's release package unchanged.
+
+#### Scenario: No plugin is rooted at the marketplace root while a sibling exists
+- **WHEN** the marketplace hosts more than one plugin
+- **THEN** every plugin's `source` resolves to a directory containing no other plugin
+
+#### Scenario: Editing one plugin leaves the other's package byte-identical
+- **WHEN** a file changes in one plugin's tree
+- **THEN** the other plugin's release package is unchanged
+
 ### Requirement: Each plugin versions independently
 
 Each plugin SHALL carry its own manifest version, and the two versions SHALL NOT be required to
